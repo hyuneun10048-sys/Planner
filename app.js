@@ -1,24 +1,30 @@
 /* ===========================================================
-   My Planner — 할 일(섹션별) + 하루 시간 기록
+   My Planner — 섹션별 할 일 + 10분 단위 타임테이블 + 월간 달력
    데이터는 브라우저 localStorage 에 저장됩니다.
    =========================================================== */
 
 const EMOJI_CDN = "https://cdn.jsdelivr.net/npm/emoji-datasource-apple@15.1.2/img/apple/64/";
-const STORE_KEY = "planner.v1";
+const STORE_KEY = "planner.v2";
+const OLD_KEY = "planner.v1";
+const DAY_START_HOUR = 5; // 하루는 새벽 5시에 시작 (밤샘 공부도 같은 날로 기록)
+const HOUR = 3600000;
+const SLOT = 10 * 60000;   // 타임테이블 한 칸 = 10분
+
+const PALETTE = ["#a24bd1", "#f07d12", "#14a5b5", "#e8467c", "#4a7cf0", "#2fb36b", "#e3b021", "#8a5a3c", "#6b5cc4", "#7b8794"];
 
 const EMOJI_CHOICES = [
   "📚", "💼", "🏠", "💪", "🎯", "📝", "💻", "📖",
   "🏃", "🍽️", "☕", "😴", "🎮", "🧹", "🛒", "💊",
   "🎨", "🎵", "✈️", "💰", "❤️", "🌱", "🔥", "⭐",
-  "📞", "📧", "🧘", "🚗", "🐶", "🎬", "✏️", "📌",
+  "📞", "📧", "🧘", "🚗", "🐶", "🎬", "⚖️", "🚓",
 ];
 
-const COLORS = ["#a8d5ba", "#f7c5a8", "#b5c8f2", "#f5d98b", "#d6b8f0", "#f2b5c4", "#9fd9e0", "#c9d6a3", "#e8c4a0", "#c4c4f5"];
+const CHECK_SVG = `<svg viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /* ---------- 이모지 → 애플 이모지 이미지 ---------- */
-function emo(ch, cls = "") {
+function emo(ch) {
   const code = [...ch].map((c) => c.codePointAt(0).toString(16)).join("-");
-  return `<img class="emo ${cls}" src="${EMOJI_CDN}${code}.png" alt="${ch}" draggable="false" loading="lazy" onerror="this.replaceWith(document.createTextNode(this.alt))">`;
+  return `<img class="emo" src="${EMOJI_CDN}${code}.png" alt="${ch}" draggable="false" onerror="this.replaceWith(document.createTextNode(this.alt))">`;
 }
 
 /* ---------- 유틸 ---------- */
@@ -28,133 +34,270 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const pad = (n) => String(n).padStart(2, "0");
 const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fromKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const todayKey = () => dateKey(new Date(Date.now() - DAY_START_HOUR * HOUR));
+const dayWindow = (k) => { const s = fromKey(k).getTime() + DAY_START_HOUR * HOUR; return [s, s + 24 * HOUR]; };
 const hm = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-function dur(ms, withSec = false) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  if (withSec) return `${pad(h)}:${pad(m)}:${pad(sec)}`;
-  if (h && m) return `${h}시간 ${m}분`;
-  if (h) return `${h}시간`;
-  return `${m}분`;
-}
-function hexToSoft(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r},${g},${b},0.22)`;
-}
+const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
+const hmShort = (ms) => { const m = Math.floor(ms / 60000); return `${Math.floor(m / 60)}H ${pad(m % 60)}M`; };
+const korDur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); const h = Math.floor(m / 60); return h ? `${h}시간 ${m % 60}분` : `${m}분`; };
+const soft = (hex, a = 0.14) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
 
 /* ---------- 상태 ---------- */
 function defaultState() {
   return {
     sections: [
-      { id: uid(), emoji: "📚", name: "공부" },
-      { id: uid(), emoji: "💼", name: "업무" },
-      { id: uid(), emoji: "🏠", name: "개인" },
+      { id: uid(), emoji: "📚", name: "공부", color: PALETTE[0] },
+      { id: uid(), emoji: "💼", name: "업무", color: PALETTE[2] },
+      { id: uid(), emoji: "🏃", name: "운동", color: PALETTE[1] },
+      { id: uid(), emoji: "🏠", name: "개인", color: PALETTE[3] },
     ],
-    todos: {},      // { "YYYY-MM-DD": [{id, sectionId, text, done}] }
-    activities: [
-      { id: uid(), emoji: "📚", name: "공부", color: COLORS[0] },
-      { id: uid(), emoji: "💻", name: "작업", color: COLORS[2] },
-      { id: uid(), emoji: "🍽️", name: "식사", color: COLORS[1] },
-      { id: uid(), emoji: "🏃", name: "운동", color: COLORS[3] },
-      { id: uid(), emoji: "🎮", name: "휴식", color: COLORS[4] },
-      { id: uid(), emoji: "😴", name: "수면", color: COLORS[6] },
-    ],
-    logs: {},       // { "YYYY-MM-DD": [{id, activityId, start, end}] }
-    running: null,  // { activityId, start }
+    todos: {},     // { "YYYY-MM-DD": [{ id, sectionId, text, done }] }
+    logs: [],      // [{ id, sectionId, start, end }]
+    running: null, // { sectionId, start }
+    calOpen: true,
   };
 }
 
-let state;
-try {
-  state = JSON.parse(localStorage.getItem(STORE_KEY)) || defaultState();
-} catch {
-  state = defaultState();
+function load() {
+  try {
+    const v2 = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (v2) return v2;
+    const v1 = JSON.parse(localStorage.getItem(OLD_KEY));
+    if (v1) { // 이전 버전 데이터 옮기기 (섹션·할 일 유지, 같은 이름의 활동 기록은 섹션으로 연결)
+      const s = defaultState();
+      s.sections = v1.sections.map((x, i) => ({ ...x, color: PALETTE[i % PALETTE.length] }));
+      s.todos = v1.todos || {};
+      const byName = Object.fromEntries(s.sections.map((x) => [x.name, x.id]));
+      for (const list of Object.values(v1.logs || {})) {
+        for (const l of list) {
+          const act = (v1.activities || []).find((a) => a.id === l.activityId);
+          if (act && byName[act.name]) s.logs.push({ id: l.id, sectionId: byName[act.name], start: l.start, end: l.end });
+        }
+      }
+      return s;
+    }
+  } catch {}
+  return defaultState();
 }
-const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {} };
 
-let current = dateKey(new Date());
-let editingActs = false;
-let sectionEmoji = "🎯";
-let actEmoji = "⭐";
+let state = load();
+const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {} };
+save();
+
+let current = todayKey();
+let viewMonth = fromKey(current); viewMonth.setDate(1);
+let editing = false;
+let openAdd = null;          // 할 일 입력창이 열린 섹션 id
+let newSectionEmoji = "🎯";
 
 const todosOf = (k) => (state.todos[k] ||= []);
-const logsOf = (k) => (state.logs[k] ||= []);
-const actById = (id) => state.activities.find((a) => a.id === id) || { emoji: "❓", name: "삭제된 활동", color: "#ddd" };
+const secById = (id) => state.sections.find((s) => s.id === id) || { id, emoji: "❓", name: "삭제된 섹션", color: "#b8b8b8" };
+
+/** 선택한 날의 기록(진행 중 포함), 하루 범위로 잘라서 */
+function entriesFor(k) {
+  const [ws, we] = dayWindow(k);
+  const list = state.logs.slice();
+  if (state.running) list.push({ id: "live", sectionId: state.running.sectionId, start: state.running.start, end: Date.now(), live: true });
+  return list
+    .filter((e) => overlap(e.start, e.end, ws, we) > 0)
+    .map((e) => ({ ...e, s: Math.max(e.start, ws), e: Math.min(e.end, we) }))
+    .sort((a, b) => a.s - b.s);
+}
 
 /* ===========================================================
-   헤더
+   타이머
    =========================================================== */
-function renderHeader() {
-  $("#brand").innerHTML = `${emo("🗓️")} My Planner`;
-  $("#prevDay").innerHTML = emo("👈");
-  $("#nextDay").innerHTML = emo("👉");
-  const d = fromKey(current);
-  const days = ["일", "월", "화", "수", "목", "금", "토"];
-  const isToday = current === dateKey(new Date());
-  $("#dateLabel").textContent = `${d.getMonth() + 1}월 ${d.getDate()}일 (${days[d.getDay()]})${isToday ? " · 오늘" : ""}`;
-  $("#todoTitle").innerHTML = `${emo("✅")} 할 일`;
-  $("#timeTitle").innerHTML = `${emo("⏱️")} 시간 기록`;
+function toggleTimer(sectionId) {
+  const now = Date.now();
+  const r = state.running;
+  if (r) {
+    stopTimer(now);
+    if (r.sectionId === sectionId) { save(); renderDay(); return; } // 같은 섹션 → 종료
+  }
+  state.running = { sectionId, start: now };                       // 다른 섹션 → 전환
+  save();
+  renderDay();
+}
+function stopTimer(end = Date.now()) {
+  const r = state.running;
+  if (!r) return;
+  state.running = null;
+  if (end - r.start >= 1000) state.logs.push({ id: uid(), sectionId: r.sectionId, start: r.start, end });
 }
 
-function shiftDay(n) {
-  const d = fromKey(current);
-  d.setDate(d.getDate() + n);
-  current = dateKey(d);
-  renderAll();
+/* ===========================================================
+   상단 / 달력
+   =========================================================== */
+function renderTop() {
+  $("#brand").innerHTML = `${emo("🗓️")} My Planner`;
+  $("#calToggle").innerHTML = emo(state.calOpen ? "📅" : "🗓️");
+  $("#calCard").classList.toggle("hidden", !state.calOpen);
 }
+
+function renderCalendar() {
+  if (!state.calOpen) return;
+  const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  $("#calTitle").textContent = `${months[m]} ${y}`;
+
+  const wds = ["S", "M", "T", "W", "T", "F", "S"];
+  let html = wds.map((w, i) => `<div class="cal-wd ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</div>`).join("");
+
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  for (let i = 0; i < first; i++) html += `<div class="cal-day other"></div>`;
+
+  const tk = todayKey();
+  for (let d = 1; d <= days; d++) {
+    const k = dateKey(new Date(y, m, d));
+    const dow = (first + d - 1) % 7;
+    const list = state.todos[k] || [];
+    const done = list.filter((t) => t.done);
+    const left = list.length - done.length;
+
+    // 완료한 할 일의 섹션 색으로 동그라미를 채움
+    let bg = "", inner = "";
+    if (done.length) {
+      const colors = done.map((t) => secById(t.sectionId).color);
+      const step = 100 / colors.length;
+      bg = `background:conic-gradient(${colors.map((c, i) => `${c} ${i * step}% ${(i + 1) * step}%`).join(",")})`;
+    }
+    if (list.length && !left) inner = CHECK_SVG;
+    else if (left) inner = String(left);
+
+    html += `
+      <button class="cal-day ${dow === 0 ? "sun" : dow === 6 ? "sat" : ""} ${k === tk ? "today" : ""} ${k === current ? "selected" : ""}" data-k="${k}">
+        <span class="mark" style="${bg}">${inner}</span>
+        <span class="num">${d}</span>
+      </button>`;
+  }
+  $("#calGrid").innerHTML = html;
+}
+
+$("#calGrid").addEventListener("click", (e) => {
+  const b = e.target.closest(".cal-day[data-k]");
+  if (!b) return;
+  current = b.dataset.k;
+  renderCalendar();
+  renderDay();
+});
+$("#prevMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() - 1); renderCalendar(); };
+$("#nextMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() + 1); renderCalendar(); };
+$("#calToggle").onclick = () => { state.calOpen = !state.calOpen; save(); renderTop(); renderCalendar(); };
+$("#todayBtn").onclick = () => goTo(todayKey());
+
+function goTo(k) {
+  current = k;
+  viewMonth = fromKey(k); viewMonth.setDate(1);
+  openAdd = null;
+  renderCalendar();
+  renderDay();
+}
+function shiftDay(n) { const d = fromKey(current); d.setDate(d.getDate() + n); goTo(dateKey(d)); }
 $("#prevDay").onclick = () => shiftDay(-1);
 $("#nextDay").onclick = () => shiftDay(1);
-$("#dateLabel").onclick = () => { current = dateKey(new Date()); renderAll(); };
 
 /* ===========================================================
-   할 일 (왼쪽)
+   하루 카드
    =========================================================== */
-function renderTodos() {
-  const list = todosOf(current);
-  const done = list.filter((t) => t.done).length;
-  $("#todoProgress").textContent = list.length ? `${done} / ${list.length} 완료` : "";
+function renderDayHead(entries) {
+  const d = fromKey(current);
+  const days = ["일", "월", "화", "수", "목", "금", "토"];
+  $("#dayDate").textContent = `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()} (${days[d.getDay()]})`;
+  const total = entries.reduce((s, e) => s + (e.e - e.s), 0);
+  $("#dayTotal").textContent = hmShort(total);
+}
 
+function renderNowBar() {
+  const bar = $("#nowBar");
+  const r = state.running;
+  if (!r) { bar.classList.add("hidden"); return; }
+  const sec = secById(r.sectionId);
+  bar.classList.remove("hidden");
+  bar.style.setProperty("--c", sec.color);
+  bar.style.setProperty("--cbg", soft(sec.color));
+  bar.innerHTML = `
+    <span class="dot"></span>
+    <span class="what">${emo(sec.emoji)} ${esc(sec.name)}<span class="since">${hm(r.start)}부터</span></span>
+    <span class="clock" id="nowClock">${clock(Date.now() - r.start)}</span>
+    <button class="stop" id="stopBtn">종료</button>`;
+  $("#stopBtn").onclick = () => { stopTimer(); save(); renderDay(); };
+}
+
+function sectionTotals(entries) {
+  const t = {};
+  for (const e of entries) t[e.sectionId] = (t[e.sectionId] || 0) + (e.e - e.s);
+  return t;
+}
+
+function renderSections(entries) {
+  const totals = sectionTotals(entries);
+  const list = todosOf(current);
   const wrap = $("#sections");
+  wrap.parentElement.classList.toggle("editing", editing);
+  $("#editToggle").classList.toggle("on", editing);
+  $("#editToggle").textContent = editing ? "완료" : "편집";
+
   if (!state.sections.length) {
-    wrap.innerHTML = `<p class="empty">아래에서 섹션을 먼저 추가해 주세요.</p>`;
+    wrap.innerHTML = `<p class="empty-sec">${emo("🌱")} ＋ 섹션으로 시작해 보세요</p>`;
     return;
   }
 
   wrap.innerHTML = state.sections.map((sec) => {
     const items = list.filter((t) => t.sectionId === sec.id);
-    const left = items.filter((t) => !t.done).length;
+    const running = state.running?.sectionId === sec.id;
     return `
-      <div class="section" data-sec="${sec.id}">
-        <div class="section-head">
-          <div class="section-title">${emo(sec.emoji)} ${esc(sec.name)} <span class="count">${items.length ? left : ""}</span></div>
-          <button class="mini" data-act="rename" title="이름 바꾸기">${emo("✏️")}</button>
-          <button class="mini" data-act="delsec" title="섹션 삭제">${emo("🗑️")}</button>
+      <div class="section ${running ? "running" : ""}" data-sec="${sec.id}" style="--c:${sec.color}">
+        <div class="sec-head">
+          <button class="sec-main" data-act="timer" title="눌러서 시간 기록 시작/종료">
+            <span class="sec-bar"></span>
+            ${emo(sec.emoji)}
+            <span class="sec-name">${esc(sec.name)}</span>
+            <span class="sec-time" data-time="${sec.id}">${clock(totals[sec.id] || 0)}</span>
+          </button>
+          <button class="sec-add" data-act="open-add" aria-label="할 일 추가">＋</button>
+          <span class="sec-tools">
+            <button class="tool" data-act="emoji" title="아이콘 바꾸기">${emo(sec.emoji)}</button>
+            <button class="tool" data-act="color" title="색 바꾸기"><span class="swatch"></span></button>
+            <button class="tool" data-act="rename" title="이름 바꾸기">${emo("✏️")}</button>
+            <button class="tool" data-act="delsec" title="섹션 삭제">${emo("🗑️")}</button>
+          </span>
         </div>
         <ul class="todo-list">
           ${items.map((t) => `
             <li class="todo ${t.done ? "done" : ""}" data-id="${t.id}">
-              <button class="check" data-act="toggle" aria-label="완료">${t.done ? emo("✅") : ""}</button>
+              <button class="check" data-act="toggle" aria-label="완료">${CHECK_SVG}</button>
               <span class="todo-text">${esc(t.text)}</span>
               <button class="del" data-act="deltodo" aria-label="삭제">${emo("❌")}</button>
             </li>`).join("")}
         </ul>
-        <form class="add-todo" data-act="add" autocomplete="off">
-          <input name="text" placeholder="+ 할 일 추가" maxlength="120" />
-        </form>
+        ${openAdd === sec.id ? `
+          <form class="add-todo" autocomplete="off">
+            <input name="text" placeholder="할 일 입력 후 Enter" maxlength="120" />
+          </form>` : ""}
       </div>`;
   }).join("");
+
+  if (openAdd) wrap.querySelector(`.section[data-sec="${openAdd}"] .add-todo input`)?.focus();
 }
 
 $("#sections").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-act]");
-  if (!btn || btn.tagName === "FORM") return;
-  const secEl = btn.closest(".section");
-  const secId = secEl?.dataset.sec;
+  if (!btn) return;
+  const secId = btn.closest(".section")?.dataset.sec;
+  const sec = state.sections.find((s) => s.id === secId);
   const todoId = btn.closest(".todo")?.dataset.id;
   const list = todosOf(current);
 
   switch (btn.dataset.act) {
+    case "timer":
+      if (editing) return;
+      toggleTimer(secId);
+      return;
+    case "open-add":
+      openAdd = openAdd === secId ? null : secId;
+      break;
     case "toggle": {
       const t = list.find((x) => x.id === todoId);
       if (t) t.done = !t.done;
@@ -163,302 +306,189 @@ $("#sections").addEventListener("click", (e) => {
     case "deltodo":
       state.todos[current] = list.filter((x) => x.id !== todoId);
       break;
-    case "rename": {
-      const sec = state.sections.find((s) => s.id === secId);
-      const name = prompt("섹션 이름", sec.name);
-      if (name && name.trim()) sec.name = name.trim().slice(0, 30);
+    case "emoji":
+      openPicker(btn, (c) => { sec.emoji = c; save(); renderDay(); });
+      return;
+    case "color": {
+      const i = PALETTE.indexOf(sec.color);
+      sec.color = PALETTE[(i + 1) % PALETTE.length];
       break;
     }
-    case "delsec": {
-      const sec = state.sections.find((s) => s.id === secId);
-      if (!confirm(`'${sec.name}' 섹션을 삭제할까요?\n(모든 날짜의 이 섹션 할 일도 함께 지워져요)`)) return;
+    case "rename": {
+      const name = prompt("섹션 이름", sec.name);
+      if (name && name.trim()) sec.name = name.trim().slice(0, 20);
+      break;
+    }
+    case "delsec":
+      if (!confirm(`'${sec.name}' 섹션을 삭제할까요?\n모든 날짜의 이 섹션 할 일도 함께 지워져요. (시간 기록은 남아요)`)) return;
+      if (state.running?.sectionId === secId) stopTimer();
       state.sections = state.sections.filter((s) => s.id !== secId);
       for (const k in state.todos) state.todos[k] = state.todos[k].filter((t) => t.sectionId !== secId);
       break;
-    }
-    default: return;
+    default:
+      return;
   }
   save();
-  renderTodos();
+  renderCalendar();
+  renderDay();
 });
 
 $("#sections").addEventListener("submit", (e) => {
   e.preventDefault();
-  const form = e.target;
-  const input = form.elements.text;
+  const input = e.target.elements.text;
   const text = input.value.trim();
-  if (!text) return;
-  const secId = form.closest(".section").dataset.sec;
-  todosOf(current).push({ id: uid(), sectionId: secId, text, done: false });
+  if (!text) { openAdd = null; renderDay(); return; }
+  todosOf(current).push({ id: uid(), sectionId: openAdd, text, done: false });
   save();
-  renderTodos();
-  // 같은 섹션 입력창에 계속 입력할 수 있게 포커스 유지
-  document.querySelector(`.section[data-sec="${secId}"] .add-todo input`)?.focus();
+  renderCalendar();
+  renderDay(); // 입력창은 열린 채로 다시 포커스
+});
+$("#sections").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
 
+/* 섹션 추가 / 편집 모드 */
+$("#showAddSection").onclick = () => {
+  const f = $("#addSectionForm");
+  f.classList.toggle("hidden");
+  if (!f.classList.contains("hidden")) $("#sectionName").focus();
+};
+$("#sectionEmojiBtn").onclick = (e) => openPicker(e.currentTarget, (c) => { newSectionEmoji = c; paintPicker(); });
+function paintPicker() { $("#sectionEmojiBtn").innerHTML = emo(newSectionEmoji); }
 $("#addSectionForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const name = $("#sectionName").value.trim();
   if (!name) return;
-  state.sections.push({ id: uid(), emoji: sectionEmoji, name });
+  const used = new Set(state.sections.map((s) => s.color));
+  const color = PALETTE.find((c) => !used.has(c)) || PALETTE[state.sections.length % PALETTE.length];
+  state.sections.push({ id: uid(), emoji: newSectionEmoji, name, color });
   $("#sectionName").value = "";
+  $("#addSectionForm").classList.add("hidden");
   save();
-  renderTodos();
+  renderDay();
 });
+$("#editToggle").onclick = () => { editing = !editing; openAdd = null; renderDay(); };
 
 /* ===========================================================
-   시간 기록 (오른쪽)
+   10분 단위 타임테이블
    =========================================================== */
-function startActivity(id) {
+function renderTimetable(entries) {
+  const [ws] = dayWindow(current);
   const now = Date.now();
-  if (state.running) {
-    const wasSame = state.running.activityId === id;
-    stopRunning(now);
-    if (wasSame) { save(); renderTime(); return; }  // 같은 걸 다시 누르면 종료
-  }
-  state.running = { activityId: id, start: now };
-  save();
-  renderTime();
-}
-
-function stopRunning(end = Date.now()) {
-  const r = state.running;
-  if (!r) return;
-  state.running = null;
-  if (end - r.start < 1000) return; // 실수로 누른 1초 미만 기록은 무시
-  logsOf(dateKey(new Date(r.start))).push({ id: uid(), activityId: r.activityId, start: r.start, end });
-}
-
-function renderNowCard() {
-  const card = $("#nowCard");
-  const r = state.running;
-  if (!r) {
-    card.className = "now-card";
-    card.style.removeProperty("--run-bg");
-    card.innerHTML = `
-      <div class="big-emo">${emo("⏰")}</div>
-      <div class="info">
-        <div class="label">지금은 기록 중이 아니에요</div>
-        <div class="name">아래 활동을 눌러 시작하세요</div>
-      </div>`;
-    return;
-  }
-  const a = actById(r.activityId);
-  card.className = "now-card running";
-  card.style.setProperty("--run-bg", hexToSoft(a.color));
-  card.innerHTML = `
-    <div class="big-emo">${emo(a.emoji)}</div>
-    <div class="info">
-      <div class="label">${hm(r.start)}부터 기록 중</div>
-      <div class="name">${esc(a.name)}</div>
-    </div>
-    <div class="timer" id="timer">${dur(Date.now() - r.start, true)}</div>
-    <button class="stop-btn" id="stopBtn">${emo("⏹️")} 종료</button>`;
-  $("#stopBtn").onclick = () => { stopRunning(); save(); renderTime(); };
-}
-
-function renderActs() {
-  const box = $("#acts");
-  box.classList.toggle("editing", editingActs);
-  $("#addActForm").classList.toggle("hidden", !editingActs);
-  $("#editActs").textContent = editingActs ? "완료" : "편집";
-  $("#editActs").classList.toggle("on", editingActs);
-  box.innerHTML = state.activities.map((a) => `
-    <button class="act ${state.running?.activityId === a.id ? "active" : ""}" data-id="${a.id}"
-            style="--c:${a.color};--cbg:${hexToSoft(a.color)}">
-      ${emo(a.emoji)}
-      <span>${esc(a.name)}</span>
-      <span class="x" data-del="1">×</span>
-    </button>`).join("");
-}
-
-$("#acts").addEventListener("click", (e) => {
-  const btn = e.target.closest(".act");
-  if (!btn) return;
-  const id = btn.dataset.id;
-  if (editingActs) {
-    if (!e.target.closest("[data-del]")) return;
-    const a = actById(id);
-    if (!confirm(`'${a.name}' 활동을 삭제할까요? (기존 기록은 남아요)`)) return;
-    if (state.running?.activityId === id) stopRunning();
-    state.activities = state.activities.filter((x) => x.id !== id);
-    save();
-    renderTime();
-    return;
-  }
-  startActivity(id);
-});
-
-$("#editActs").onclick = () => { editingActs = !editingActs; renderActs(); };
-
-$("#addActForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const name = $("#actName").value.trim();
-  if (!name) return;
-  const color = COLORS[state.activities.length % COLORS.length];
-  state.activities.push({ id: uid(), emoji: actEmoji, name, color });
-  $("#actName").value = "";
-  save();
-  renderActs();
-});
-
-/** 선택한 날짜의 기록 (진행 중 포함) */
-function dayEntries() {
-  const entries = logsOf(current).map((l) => ({ ...l }));
-  const r = state.running;
-  if (r && dateKey(new Date(r.start)) === current) {
-    entries.push({ id: "live", activityId: r.activityId, start: r.start, end: Date.now(), live: true });
-  }
-  return entries.sort((a, b) => a.start - b.start);
-}
-
-function renderSummary(entries) {
-  const totals = new Map();
-  let all = 0;
-  for (const e of entries) {
-    const ms = e.end - e.start;
-    totals.set(e.activityId, (totals.get(e.activityId) || 0) + ms);
-    all += ms;
-  }
-  if (!entries.length) { $("#summary").innerHTML = ""; return; }
-  const chips = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([id, ms]) => {
-    const a = actById(id);
-    return `<span class="chip"><span class="dot" style="background:${a.color}"></span>${esc(a.name)} ${dur(ms)}</span>`;
-  });
-  $("#summary").innerHTML = `<span class="chip total">총 ${dur(all)}</span>${chips.join("")}`;
-}
-
-const HOUR_PX = 40;
-function renderTimeline(entries) {
-  const tl = $("#timeline");
-  const dayStart = fromKey(current).getTime();
-  const dayEnd = dayStart + 86400000;
-  const toPx = (ts) => ((Math.min(Math.max(ts, dayStart), dayEnd) - dayStart) / 3600000) * HOUR_PX;
-
   let html = "";
-  for (let h = 0; h < 24; h++) html += `<div class="hour" style="top:${h * HOUR_PX}px">${pad(h)}</div>`;
-  for (const e of entries) {
-    const a = actById(e.activityId);
-    const top = toPx(e.start);
-    const height = Math.max(3, toPx(e.end) - top);
-    const label = height >= 16 ? `${emo(a.emoji)}<span>${esc(a.name)}</span>` : "";
-    html += `<div class="block ${e.live ? "live" : ""}" style="top:${top}px;height:${height}px;--c:${a.color}" title="${esc(a.name)} ${hm(e.start)}–${hm(e.end)}">${label}</div>`;
+  for (let h = 0; h < 24; h++) {
+    const hour = (DAY_START_HOUR + h) % 24;
+    const label = hour % 12 === 0 ? 12 : hour % 12;
+    const first = h === 0 ? "first" : "";
+    html += `<div class="tt-h ${first}">${label}</div>`;
+    for (let s = 0; s < 6; s++) {
+      const a = ws + (h * 6 + s) * SLOT, b = a + SLOT;
+      let best = null, bestMs = 0, filled = 0, live = false;
+      for (const e of entries) {
+        const o = overlap(e.s, e.e, a, b);
+        if (!o) continue;
+        filled += o;
+        if (o > bestMs) { bestMs = o; best = e; }
+        if (e.live) live = true;
+      }
+      const isNow = now >= a && now < b;
+      let inner = "";
+      if (best) {
+        const sec = secById(best.sectionId);
+        const startPct = Math.max(0, (Math.min(...entries.filter((e) => overlap(e.s, e.e, a, b)).map((e) => e.s)) - a) / SLOT * 100);
+        const w = Math.min(100 - startPct, (filled / SLOT) * 100);
+        inner = `<i style="--c:${sec.color};left:${startPct}%;width:${Math.max(w, 6)}%"></i>`;
+      }
+      html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""}" ${best ? `title="${esc(secById(best.sectionId).name)}"` : ""}>${inner}</div>`;
+    }
   }
-  const now = Date.now();
-  if (now >= dayStart && now < dayEnd) html += `<div class="now-line" style="top:${toPx(now)}px"></div>`;
-  tl.innerHTML = html;
+  $("#timetable").innerHTML = html;
 }
 
-function renderLogList(entries) {
-  const ul = $("#logList");
-  if (!entries.length) {
-    ul.innerHTML = `<li class="empty">${emo("🌱")} 아직 기록이 없어요.<br>활동을 눌러 하루를 기록해 보세요.</li>`;
-    return;
-  }
-  ul.innerHTML = entries.slice().reverse().map((e) => {
-    const a = actById(e.activityId);
+/* ===========================================================
+   기록 목록
+   =========================================================== */
+function renderLogs(entries) {
+  $("#logsSummary").textContent = entries.length ? `기록 ${entries.length}개 보기` : "아직 기록이 없어요";
+  $("#logList").innerHTML = entries.slice().reverse().map((e) => {
+    const sec = secById(e.sectionId);
     return `
-      <li class="log" style="--c:${a.color}" data-id="${e.id}">
+      <li class="log" style="--c:${sec.color}" data-id="${e.id}">
         <span class="bar"></span>
-        <div class="meta">
-          <div class="n">${emo(a.emoji)} ${esc(a.name)}</div>
-          <div class="t">${hm(e.start)} – ${e.live ? "진행 중" : hm(e.end)}</div>
-        </div>
-        <span class="d">${dur(e.end - e.start)}</span>
+        <span class="n">${emo(sec.emoji)} ${esc(sec.name)}</span>
+        <span class="t">${hm(e.start)} – ${e.live ? "진행 중" : hm(e.end)}</span>
+        <span class="d">${korDur(e.e - e.s)}</span>
         ${e.live ? "" : `<button class="del" aria-label="삭제">${emo("🗑️")}</button>`}
       </li>`;
   }).join("");
 }
-
 $("#logList").addEventListener("click", (e) => {
-  const btn = e.target.closest(".del");
-  if (!btn) return;
-  const id = btn.closest(".log").dataset.id;
+  const b = e.target.closest(".del");
+  if (!b) return;
+  const id = b.closest(".log").dataset.id;
   if (!confirm("이 기록을 삭제할까요?")) return;
-  state.logs[current] = logsOf(current).filter((l) => l.id !== id);
+  state.logs = state.logs.filter((l) => l.id !== id);
   save();
-  renderTime();
+  renderDay();
 });
 
-function renderTime() {
-  renderNowCard();
-  renderActs();
-  const entries = dayEntries();
-  renderSummary(entries);
-  renderTimeline(entries);
-  renderLogList(entries);
+function renderDay() {
+  const entries = entriesFor(current);
+  renderDayHead(entries);
+  renderNowBar();
+  renderSections(entries);
+  renderTimetable(entries);
+  renderLogs(entries);
 }
 
 /* ===========================================================
    이모지 선택 팝오버
    =========================================================== */
-let pickerCallback = null;
+let pickerCb = null;
 const pop = $("#emojiPopover");
 pop.innerHTML = EMOJI_CHOICES.map((c) => `<button type="button" data-e="${c}">${emo(c)}</button>`).join("");
-
 function openPicker(anchor, cb) {
-  pickerCallback = cb;
+  pickerCb = cb;
   pop.classList.remove("hidden");
   const r = anchor.getBoundingClientRect();
-  const w = pop.offsetWidth;
-  const left = Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - w - 12);
-  pop.style.left = `${Math.max(12, left)}px`;
+  const maxLeft = window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12;
+  pop.style.left = `${Math.max(12, Math.min(r.left + window.scrollX, maxLeft))}px`;
   pop.style.top = `${r.bottom + window.scrollY + 6}px`;
 }
 pop.addEventListener("click", (e) => {
   const b = e.target.closest("[data-e]");
   if (!b) return;
-  pickerCallback?.(b.dataset.e);
+  pickerCb?.(b.dataset.e);
   pop.classList.add("hidden");
 });
 document.addEventListener("click", (e) => {
-  if (!pop.contains(e.target) && !e.target.closest(".emoji-pick")) pop.classList.add("hidden");
+  if (!pop.contains(e.target) && !e.target.closest(".emoji-pick, [data-act='emoji']")) pop.classList.add("hidden");
 });
 
-function paintPickers() {
-  $("#sectionEmojiBtn").innerHTML = emo(sectionEmoji);
-  $("#actEmojiBtn").innerHTML = emo(actEmoji);
-}
-$("#sectionEmojiBtn").onclick = (e) => openPicker(e.currentTarget, (c) => { sectionEmoji = c; paintPickers(); });
-$("#actEmojiBtn").onclick = (e) => openPicker(e.currentTarget, (c) => { actEmoji = c; paintPickers(); });
-
 /* ===========================================================
-   시작
+   시작 & 실시간 갱신
    =========================================================== */
-function scrollTimelineToNow() {
-  const wrap = $("#timelineWrap");
-  const target = current === dateKey(new Date()) ? new Date().getHours() - 3 : 7;
-  wrap.scrollTop = Math.max(0, target * HOUR_PX);
-}
+renderTop();
+renderCalendar();
+paintPicker();
+renderDay();
 
-function renderAll() {
-  renderHeader();
-  renderTodos();
-  renderTime();
-  paintPickers();
-  scrollTimelineToNow();
-}
-
-renderAll();
-
-// 매초 타이머 갱신, 30초마다 타임라인 갱신
 let tick = 0;
 setInterval(() => {
   tick++;
-  const t = document.getElementById("timer");
-  if (t && state.running) t.textContent = dur(Date.now() - state.running.start, true);
-  if (tick % 30 === 0) {
-    const entries = dayEntries();
-    renderSummary(entries);
-    renderTimeline(entries);
-    renderLogList(entries);
-  }
+  if (!state.running) return;
+  const entries = entriesFor(current);
+  const c = document.getElementById("nowClock");
+  if (c) c.textContent = clock(Date.now() - state.running.start);
+  const el = document.querySelector(`[data-time="${state.running.sectionId}"]`);
+  if (el) el.textContent = clock(sectionTotals(entries)[state.running.sectionId] || 0);
+  renderDayHead(entries);
+  if (tick % 15 === 0) renderTimetable(entries);
 }, 1000);
 
 // 다른 탭에서 바뀐 내용 반영
 window.addEventListener("storage", (e) => {
-  if (e.key !== STORE_KEY) return;
-  try { state = JSON.parse(e.newValue) || state; } catch {}
-  renderTodos();
-  renderTime();
+  if (e.key !== STORE_KEY || !e.newValue) return;
+  try { state = JSON.parse(e.newValue); } catch { return; }
+  renderTop(); renderCalendar(); renderDay();
 });
