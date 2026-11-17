@@ -154,8 +154,8 @@ function stopTimer(end = Date.now()) {
    상단 / 달력
    =========================================================== */
 function renderTop() {
-  $("#brand").innerHTML = `${emo("🗓️")} My Planner`;
-  $("#calToggle").innerHTML = emo(state.calOpen ? "📅" : "🗓️");
+  $("#brand").innerHTML = `<span class="logo-b">MY</span><span class="logo-l">PLANNER</span>`;
+  $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${state.calOpen ? "달력 접기" : "달력"}</span>`;
   $("#calCard").classList.toggle("hidden", !state.calOpen);
 }
 
@@ -229,9 +229,30 @@ function renderDayHead(entries) {
   $("#dayTotal").textContent = hmShort(total);
 }
 
+function renderFab() {
+  const fab = $("#fab");
+  const r = state.running;
+  if (r) {
+    const sec = secById(r.sectionId);
+    fab.classList.add("running");
+    fab.style.setProperty("--c", sec.color);
+    fab.innerHTML = emo(sec.emoji);
+    fab.title = `${sec.name} 기록 중`;
+  } else {
+    fab.classList.remove("running");
+    fab.innerHTML = `<span class="fab-logo">MY</span>`;
+    fab.title = "오늘로 이동";
+  }
+}
+$("#fab").onclick = () => {
+  if (current !== todayKey()) goTo(todayKey());
+  document.querySelector(".day-card").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
 function renderNowBar() {
   const bar = $("#nowBar");
   const r = state.running;
+  renderFab();
   if (!r) { bar.classList.add("hidden"); return; }
   const sec = secById(r.sectionId);
   bar.classList.remove("hidden");
@@ -755,7 +776,7 @@ async function handleConnectLink() {
 }
 
 async function initSync() {
-  $("#syncBtn").innerHTML = `${emo("☁️")}<span class="sync-dot"></span>`;
+  $("#syncBtn").innerHTML = `${emo("☁️")}<span class="lbl">동기화</span><span class="sync-dot"></span>`;
   await handleConnectLink();
   window.addEventListener("hashchange", handleConnectLink);
   setStatus(syncOn() ? "ok" : "off");
