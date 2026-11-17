@@ -10,13 +10,18 @@ const DAY_START_HOUR = 5; // 하루는 새벽 5시에 시작 (밤샘 공부도 �
 const HOUR = 3600000;
 const SLOT = 10 * 60000;   // 타임테이블 한 칸 = 10분
 
-const PALETTE = ["#a24bd1", "#f07d12", "#14a5b5", "#e8467c", "#4a7cf0", "#2fb36b", "#e3b021", "#8a5a3c", "#6b5cc4", "#7b8794"];
+const PALETTE = [
+  "#a24bd1", "#6b5cc4", "#4a7cf0", "#14a5b5", "#2fb36b", "#8bbf3f",
+  "#e3b021", "#f07d12", "#e85d3f", "#e8467c", "#d77fb4", "#8a5a3c",
+  "#c8a27a", "#7b8794", "#3d4451", "#191919",
+];
 
 const EMOJI_CHOICES = [
-  "📚", "💼", "🏠", "💪", "🎯", "📝", "💻", "📖",
-  "🏃", "🍽️", "☕", "😴", "🎮", "🧹", "🛒", "💊",
-  "🎨", "🎵", "✈️", "💰", "❤️", "🌱", "🔥", "⭐",
-  "📞", "📧", "🧘", "🚗", "🐶", "🎬", "⚖️", "🚓",
+  "📚", "📖", "📝", "✏️", "💻", "💼", "⚖️", "🚓",
+  "🧮", "🔬", "🌏", "🗣️", "🎯", "🔥", "⭐", "💡",
+  "🏃", "💪", "🧘", "🚴", "🍽️", "☕", "😴", "💊",
+  "🏠", "🧹", "🛒", "💰", "📞", "📧", "🚗", "✈️",
+  "🎨", "🎵", "🎮", "🎬", "📷", "🐶", "🌱", "❤️",
 ];
 
 const CHECK_SVG = `<svg viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -47,10 +52,10 @@ const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, 
 function defaultState() {
   return {
     sections: [
-      { id: uid(), emoji: "📚", name: "공부", color: PALETTE[0] },
-      { id: uid(), emoji: "💼", name: "업무", color: PALETTE[2] },
-      { id: uid(), emoji: "🏃", name: "운동", color: PALETTE[1] },
-      { id: uid(), emoji: "🏠", name: "개인", color: PALETTE[3] },
+      { id: uid(), emoji: "📚", name: "공부", color: "#a24bd1" },
+      { id: uid(), emoji: "💼", name: "업무", color: "#14a5b5" },
+      { id: uid(), emoji: "🏃", name: "운동", color: "#f07d12" },
+      { id: uid(), emoji: "🏠", name: "개인", color: "#e8467c" },
     ],
     todos: {},     // { "YYYY-MM-DD": [{ id, sectionId, text, done }] }
     logs: [],      // [{ id, sectionId, start, end }]
@@ -89,7 +94,6 @@ let current = todayKey();
 let viewMonth = fromKey(current); viewMonth.setDate(1);
 let editing = false;
 let openAdd = null;          // 할 일 입력창이 열린 섹션 id
-let newSectionEmoji = "🎯";
 
 const todosOf = (k) => (state.todos[k] ||= []);
 const secById = (id) => state.sections.find((s) => s.id === id) || { id, emoji: "❓", name: "삭제된 섹션", color: "#b8b8b8" };
@@ -258,10 +262,9 @@ function renderSections(entries) {
           </button>
           <button class="sec-add" data-act="open-add" aria-label="할 일 추가">＋</button>
           <span class="sec-tools">
-            <button class="tool" data-act="emoji" title="아이콘 바꾸기">${emo(sec.emoji)}</button>
-            <button class="tool" data-act="color" title="색 바꾸기"><span class="swatch"></span></button>
-            <button class="tool" data-act="rename" title="이름 바꾸기">${emo("✏️")}</button>
-            <button class="tool" data-act="delsec" title="섹션 삭제">${emo("🗑️")}</button>
+            <button class="tool arrow-tool" data-act="up" title="위로">↑</button>
+            <button class="tool arrow-tool" data-act="down" title="아래로">↓</button>
+            <button class="tool" data-act="settings" title="섹션 설정">${emo("⚙️")}</button>
           </span>
         </div>
         <ul class="todo-list">
@@ -292,9 +295,20 @@ $("#sections").addEventListener("click", (e) => {
 
   switch (btn.dataset.act) {
     case "timer":
-      if (editing) return;
+      if (editing) { openSheet(secId); return; }
       toggleTimer(secId);
       return;
+    case "settings":
+      openSheet(secId);
+      return;
+    case "up":
+    case "down": {
+      const i = state.sections.indexOf(sec);
+      const j = btn.dataset.act === "up" ? i - 1 : i + 1;
+      if (j < 0 || j >= state.sections.length) return;
+      [state.sections[i], state.sections[j]] = [state.sections[j], state.sections[i]];
+      break;
+    }
     case "open-add":
       openAdd = openAdd === secId ? null : secId;
       break;
@@ -305,25 +319,6 @@ $("#sections").addEventListener("click", (e) => {
     }
     case "deltodo":
       state.todos[current] = list.filter((x) => x.id !== todoId);
-      break;
-    case "emoji":
-      openPicker(btn, (c) => { sec.emoji = c; save(); renderDay(); });
-      return;
-    case "color": {
-      const i = PALETTE.indexOf(sec.color);
-      sec.color = PALETTE[(i + 1) % PALETTE.length];
-      break;
-    }
-    case "rename": {
-      const name = prompt("섹션 이름", sec.name);
-      if (name && name.trim()) sec.name = name.trim().slice(0, 20);
-      break;
-    }
-    case "delsec":
-      if (!confirm(`'${sec.name}' 섹션을 삭제할까요?\n모든 날짜의 이 섹션 할 일도 함께 지워져요. (시간 기록은 남아요)`)) return;
-      if (state.running?.sectionId === secId) stopTimer();
-      state.sections = state.sections.filter((s) => s.id !== secId);
-      for (const k in state.todos) state.todos[k] = state.todos[k].filter((t) => t.sectionId !== secId);
       break;
     default:
       return;
@@ -347,26 +342,107 @@ $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
 
-/* 섹션 추가 / 편집 모드 */
-$("#showAddSection").onclick = () => {
-  const f = $("#addSectionForm");
-  f.classList.toggle("hidden");
-  if (!f.classList.contains("hidden")) $("#sectionName").focus();
-};
-$("#sectionEmojiBtn").onclick = (e) => openPicker(e.currentTarget, (c) => { newSectionEmoji = c; paintPicker(); });
-function paintPicker() { $("#sectionEmojiBtn").innerHTML = emo(newSectionEmoji); }
-$("#addSectionForm").addEventListener("submit", (e) => {
+/* ===========================================================
+   섹션 설정 시트 (추가 / 수정)
+   =========================================================== */
+let sheetFor = null;               // 수정 중인 섹션 id (null 이면 새 섹션)
+let draft = { emoji: "📚", color: PALETTE[0] };
+
+function openSheet(secId = null) {
+  sheetFor = secId;
+  const sec = secId && state.sections.find((s) => s.id === secId);
+  if (sec) {
+    draft = { emoji: sec.emoji, color: sec.color };
+    $("#sheetName").value = sec.name;
+  } else {
+    const used = new Set(state.sections.map((s) => s.color));
+    draft = { emoji: "📚", color: PALETTE.find((c) => !used.has(c)) || PALETTE[0] };
+    $("#sheetName").value = "";
+  }
+  $("#sheetTitle").textContent = sec ? "섹션 설정" : "새 섹션";
+  $("#sheetDelete").classList.toggle("hidden", !sec);
+  paintSheet();
+  $("#sheet").classList.remove("hidden");
+  requestAnimationFrame(() => $("#sheet").classList.add("show"));
+  if (!sec) setTimeout(() => $("#sheetName").focus(), 150);
+}
+function closeSheet() {
+  $("#sheet").classList.remove("show");
+  setTimeout(() => $("#sheet").classList.add("hidden"), 200);
+}
+
+function paintSheet() {
+  const name = $("#sheetName").value.trim() || "섹션 이름";
+  const sheet = $("#sheetForm");
+  sheet.style.setProperty("--c", draft.color);
+  sheet.style.setProperty("--cbg", soft(draft.color, 0.12));
+  $("#sheetPreview").innerHTML = `
+    <span class="sec-bar"></span>${emo(draft.emoji)}
+    <span class="pv-name">${esc(name)}</span>
+    <span class="pv-time">0:00:00</span>
+    <span class="pv-check"></span>`;
+  $("#sheetEmojis").innerHTML = EMOJI_CHOICES.map((c) =>
+    `<button type="button" class="${c === draft.emoji ? "on" : ""}" data-e="${c}">${emo(c)}</button>`).join("");
+  const custom = !PALETTE.includes(draft.color);
+  $("#sheetColors").innerHTML = PALETTE.map((c) =>
+    `<button type="button" class="sw ${c === draft.color ? "on" : ""}" data-c="${c}" style="--sw:${c}" aria-label="${c}"></button>`).join("") +
+    `<label class="sw custom ${custom ? "on" : ""}" style="--sw:${custom ? draft.color : "#ffffff"}" title="직접 고르기">
+       <input type="color" id="customColor" value="${draft.color}" />
+       <span>${custom ? "" : "＋"}</span>
+     </label>`;
+}
+
+$("#sheetName").addEventListener("input", () => {
+  $("#sheetPreview .pv-name").textContent = $("#sheetName").value.trim() || "섹션 이름";
+});
+$("#sheetEmojis").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-e]");
+  if (b) { draft.emoji = b.dataset.e; paintSheet(); }
+});
+$("#sheetColors").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-c]");
+  if (b) { draft.color = b.dataset.c; paintSheet(); }
+});
+$("#sheetColors").addEventListener("input", (e) => {
+  if (e.target.id !== "customColor") return;
+  draft.color = e.target.value;
+  const sheet = $("#sheetForm");
+  sheet.style.setProperty("--c", draft.color);
+  sheet.style.setProperty("--cbg", soft(draft.color, 0.12));
+  const lab = e.target.closest(".custom");
+  lab.style.setProperty("--sw", draft.color);
+  lab.querySelector("span").textContent = "";
+  $("#sheetColors").querySelectorAll(".sw").forEach((x) => x.classList.toggle("on", x === lab));
+});
+
+$("#sheetForm").addEventListener("submit", (e) => {
   e.preventDefault();
-  const name = $("#sectionName").value.trim();
-  if (!name) return;
-  const used = new Set(state.sections.map((s) => s.color));
-  const color = PALETTE.find((c) => !used.has(c)) || PALETTE[state.sections.length % PALETTE.length];
-  state.sections.push({ id: uid(), emoji: newSectionEmoji, name, color });
-  $("#sectionName").value = "";
-  $("#addSectionForm").classList.add("hidden");
+  const name = $("#sheetName").value.trim();
+  if (!name) { $("#sheetName").focus(); return; }
+  const sec = sheetFor && state.sections.find((s) => s.id === sheetFor);
+  if (sec) Object.assign(sec, { name, emoji: draft.emoji, color: draft.color });
+  else state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color });
   save();
+  closeSheet();
+  renderCalendar();
   renderDay();
 });
+$("#sheetDelete").onclick = () => {
+  const sec = state.sections.find((s) => s.id === sheetFor);
+  if (!sec || !confirm(`'${sec.name}' 섹션을 삭제할까요?\n모든 날짜의 이 섹션 할 일도 함께 지워져요. (시간 기록은 남아요)`)) return;
+  if (state.running?.sectionId === sec.id) stopTimer();
+  state.sections = state.sections.filter((s) => s.id !== sec.id);
+  for (const k in state.todos) state.todos[k] = state.todos[k].filter((t) => t.sectionId !== sec.id);
+  save();
+  closeSheet();
+  renderCalendar();
+  renderDay();
+};
+$("#sheetCancel").onclick = closeSheet;
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").classList.contains("hidden")) closeSheet(); });
+$("#showAddSection").onclick = () => openSheet();
+
 $("#editToggle").onclick = () => { editing = !editing; openAdd = null; renderDay(); };
 
 /* ===========================================================
@@ -442,35 +518,10 @@ function renderDay() {
 }
 
 /* ===========================================================
-   이모지 선택 팝오버
-   =========================================================== */
-let pickerCb = null;
-const pop = $("#emojiPopover");
-pop.innerHTML = EMOJI_CHOICES.map((c) => `<button type="button" data-e="${c}">${emo(c)}</button>`).join("");
-function openPicker(anchor, cb) {
-  pickerCb = cb;
-  pop.classList.remove("hidden");
-  const r = anchor.getBoundingClientRect();
-  const maxLeft = window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12;
-  pop.style.left = `${Math.max(12, Math.min(r.left + window.scrollX, maxLeft))}px`;
-  pop.style.top = `${r.bottom + window.scrollY + 6}px`;
-}
-pop.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-e]");
-  if (!b) return;
-  pickerCb?.(b.dataset.e);
-  pop.classList.add("hidden");
-});
-document.addEventListener("click", (e) => {
-  if (!pop.contains(e.target) && !e.target.closest(".emoji-pick, [data-act='emoji']")) pop.classList.add("hidden");
-});
-
-/* ===========================================================
    시작 & 실시간 갱신
    =========================================================== */
 renderTop();
 renderCalendar();
-paintPicker();
 renderDay();
 
 let tick = 0;

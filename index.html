@@ -50,11 +50,6 @@
         <div class="todo-col">
           <div id="sections"></div>
 
-          <form class="add-section hidden" id="addSectionForm" autocomplete="off">
-            <button type="button" class="emoji-pick" id="sectionEmojiBtn"></button>
-            <input id="sectionName" placeholder="섹션 이름" maxlength="20" />
-            <button type="submit" class="mini-submit">추가</button>
-          </form>
           <div class="col-foot">
             <button class="ghost-pill" id="showAddSection">＋ 섹션</button>
             <button class="ghost-pill" id="editToggle">편집</button>
@@ -73,10 +68,34 @@
       </details>
     </section>
 
-    <p class="hint">섹션 이름을 누르면 시간 기록이 시작되고, 다시 누르면 멈춰요.</p>
+    <p class="hint">섹션 이름을 누르면 시간 기록이 시작되고, 다시 누르면 멈춰요. · 편집 모드에서 섹션을 누르면 이름·아이콘·색을 바꿀 수 있어요.</p>
   </div>
 
-  <div class="popover hidden" id="emojiPopover"></div>
+  <!-- 섹션 설정 시트 -->
+  <div class="sheet-backdrop hidden" id="sheet">
+    <form class="sheet" id="sheetForm" autocomplete="off">
+      <div class="sheet-grip"></div>
+      <h3 class="sheet-title" id="sheetTitle">새 섹션</h3>
+
+      <div class="sheet-preview" id="sheetPreview"></div>
+
+      <label class="field-label" for="sheetName">이름</label>
+      <input id="sheetName" class="field" placeholder="예: 헌법, 운동, 독서" maxlength="20" />
+
+      <div class="field-label">아이콘</div>
+      <div class="emoji-grid" id="sheetEmojis"></div>
+
+      <div class="field-label">색상</div>
+      <div class="swatches" id="sheetColors"></div>
+
+      <div class="sheet-actions">
+        <button type="button" class="sheet-del hidden" id="sheetDelete">섹션 삭제</button>
+        <span class="spacer"></span>
+        <button type="button" class="sheet-cancel" id="sheetCancel">취소</button>
+        <button type="submit" class="sheet-save">저장</button>
+      </div>
+    </form>
+  </div>
 
   <script src="app.js"></script>
 </body>
