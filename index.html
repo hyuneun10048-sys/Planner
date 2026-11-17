@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Planner</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="https://cdn.jsdelivr.net/npm/emoji-datasource-apple@15.1.2/img/apple/64/1f5d3-fe0f.png" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand" id="brand"></div>
+    <nav class="date-nav">
+      <button class="icon-btn" id="prevDay" aria-label="이전 날"></button>
+      <button class="date-label" id="dateLabel" title="오늘로 이동"></button>
+      <button class="icon-btn" id="nextDay" aria-label="다음 날"></button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <!-- 왼쪽: 할 일 -->
+    <section class="panel" id="todoPanel">
+      <div class="panel-head">
+        <h2 id="todoTitle"></h2>
+        <span class="progress" id="todoProgress"></span>
+      </div>
+      <div id="sections"></div>
+      <form class="add-section" id="addSectionForm" autocomplete="off">
+        <button type="button" class="emoji-pick" id="sectionEmojiBtn"></button>
+        <input id="sectionName" placeholder="새 섹션 이름 (예: 운동)" maxlength="30" />
+        <button type="submit" class="btn">추가</button>
+      </form>
+    </section>
+
+    <!-- 오른쪽: 시간 기록 -->
+    <section class="panel" id="timePanel">
+      <div class="panel-head">
+        <h2 id="timeTitle"></h2>
+        <button class="text-btn" id="editActs">편집</button>
+      </div>
+
+      <div class="now-card" id="nowCard"></div>
+
+      <div class="acts" id="acts"></div>
+      <form class="add-act hidden" id="addActForm" autocomplete="off">
+        <button type="button" class="emoji-pick" id="actEmojiBtn"></button>
+        <input id="actName" placeholder="활동 이름" maxlength="16" />
+        <button type="submit" class="btn">추가</button>
+      </form>
+
+      <div class="summary" id="summary"></div>
+
+      <div class="day-view">
+        <div class="timeline-wrap" id="timelineWrap">
+          <div class="timeline" id="timeline"></div>
+        </div>
+        <ul class="log-list" id="logList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <div class="popover hidden" id="emojiPopover"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
