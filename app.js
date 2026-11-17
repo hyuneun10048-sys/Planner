@@ -26,6 +26,22 @@ const EMOJI_CHOICES = [
 
 const CHECK_SVG = `<svg viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+/* ---------- 🍀 네잎클로버 표시 ----------
+   완료한 할 일의 섹션 색으로 잎을 칠하고, 다 끝내면 체크 / 남으면 남은 개수 */
+function clover(colors, content) {
+  const lobes = [[11, 11], [21, 11], [21, 21], [11, 21]]; // 왼위, 오위, 오아래, 왼아래
+  const n = colors.length;
+  const fill = (i) => (n ? colors[Math.floor((i * n) / 4)] : "#d6d7db");
+  let svg = `<svg class="clover" viewBox="0 0 32 32" aria-hidden="true">`;
+  lobes.forEach(([x, y], i) => { svg += `<circle cx="${x}" cy="${y}" r="9" fill="${fill(i)}"/>`; });
+  if (content === "check") {
+    svg += `<path d="M10.5 16.3l3.8 3.8 7.4-7.6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else if (content) {
+    svg += `<text x="16" y="16" text-anchor="middle" dominant-baseline="central" fill="#fff" font-size="12" font-weight="800" font-family="Pretendard, -apple-system, sans-serif">${content}</text>`;
+  }
+  return svg + `</svg>`;
+}
+
 /* ---------- 이모지 → 애플 이모지 이미지 ---------- */
 function emo(ch) {
   const code = [...ch].map((c) => c.codePointAt(0).toString(16)).join("-");
@@ -87,8 +103,12 @@ function load() {
 }
 
 let state = load();
-const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {} };
-save();
+function save(touch = true) {
+  if (touch) state.updatedAt = Date.now();
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
+  if (touch && typeof schedulePush === "function") schedulePush();
+}
+save(false);
 
 let current = todayKey();
 let viewMonth = fromKey(current); viewMonth.setDate(1);
@@ -144,6 +164,7 @@ function renderCalendar() {
   const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   $("#calTitle").textContent = `${months[m]} ${y}`;
+  loadMonthEvents(viewMonth);
 
   const wds = ["S", "M", "T", "W", "T", "F", "S"];
   let html = wds.map((w, i) => `<div class="cal-wd ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</div>`).join("");
@@ -160,20 +181,15 @@ function renderCalendar() {
     const done = list.filter((t) => t.done);
     const left = list.length - done.length;
 
-    // 완료한 할 일의 섹션 색으로 동그라미를 채움
-    let bg = "", inner = "";
-    if (done.length) {
-      const colors = done.map((t) => secById(t.sectionId).color);
-      const step = 100 / colors.length;
-      bg = `background:conic-gradient(${colors.map((c, i) => `${c} ${i * step}% ${(i + 1) * step}%`).join(",")})`;
-    }
-    if (list.length && !left) inner = CHECK_SVG;
-    else if (left) inner = String(left);
+    const colors = [...new Set(done.map((t) => secById(t.sectionId).color))];
+    const content = list.length && !left ? "check" : left ? String(left) : "";
+    const hasEv = eventsOn(k).length > 0;
 
     html += `
       <button class="cal-day ${dow === 0 ? "sun" : dow === 6 ? "sat" : ""} ${k === tk ? "today" : ""} ${k === current ? "selected" : ""}" data-k="${k}">
-        <span class="mark" style="${bg}">${inner}</span>
+        ${clover(colors, content)}
         <span class="num">${d}</span>
+        <span class="ev-dot ${hasEv ? "" : "off"}"></span>
       </button>`;
   }
   $("#calGrid").innerHTML = html;
@@ -510,6 +526,7 @@ $("#logList").addEventListener("click", (e) => {
 
 function renderDay() {
   const entries = entriesFor(current);
+  renderEvents();
   renderDayHead(entries);
   renderNowBar();
   renderSections(entries);
@@ -518,11 +535,247 @@ function renderDay() {
 }
 
 /* ===========================================================
+   구글 캘린더 일정
+   =========================================================== */
+const evCache = {};   // "YYYY-MM" → { t, list }
+const evLoading = {};
+const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+
+function eventsOn(k) {
+  const c = evCache[k.slice(0, 7)];
+  if (!c) return [];
+  const ds = fromKey(k).getTime(), de = ds + 24 * HOUR;
+  return c.list
+    .filter((e) => (e.allDay ? e.startDate <= k && k < e.endDate : overlap(e.start, e.end, ds, de) > 0))
+    .sort((a, b) => (b.allDay - a.allDay) || a.start - b.start);
+}
+
+async function loadMonthEvents(d, force = false) {
+  if (!calendarOn()) return;
+  const mk = monthKey(d);
+  const c = evCache[mk];
+  if (evLoading[mk] || (!force && c && Date.now() - c.t < 5 * 60000)) return;
+  evLoading[mk] = true;
+  try {
+    const from = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const to = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+    const res = await api("events", { from, to });
+    if (!res.ok) throw new Error(res.error);
+    evCache[mk] = { t: Date.now(), list: res.events };
+    renderCalendar();
+    renderEvents();
+  } catch (e) {
+    console.warn("캘린더 불러오기 실패", e);
+  } finally {
+    evLoading[mk] = false;
+  }
+}
+
+function renderEvents() {
+  const box = $("#events");
+  if (!calendarOn()) { box.classList.add("hidden"); return; }
+  loadMonthEvents(fromKey(current));
+  const list = eventsOn(current);
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <div class="ev-head">${emo("📅")} <span>오늘 일정</span><span class="ev-count">${list.length || ""}</span></div>
+    ${list.length ? `<ul class="ev-list">${list.map((e) => `
+      <li class="ev" style="--c:${e.color || "#4a7cf0"}">
+        <span class="ev-time">${e.allDay ? "종일" : hm(e.start)}</span>
+        <span class="ev-title">${esc(e.title || "(제목 없음)")}</span>
+      </li>`).join("")}</ul>` : `<p class="ev-empty">일정이 없어요</p>`}`;
+}
+
+/* ===========================================================
+   여러 기기 동기화 (Google Apps Script + 구글 드라이브)
+   =========================================================== */
+const SYNC_KEY = "planner.sync";
+let sync = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch { return {}; } })();
+let pushTimer = null;
+let pendingPush = false;
+
+const syncOn = () => !!(sync.url && sync.token);
+const calendarOn = () => syncOn() && sync.calendar !== false;
+const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch {} };
+
+async function api(action, extra = {}, method = "GET", cfg = sync) {
+  let r;
+  if (method === "GET") {
+    r = await fetch(`${cfg.url}?${new URLSearchParams({ action, token: cfg.token, ...extra })}`);
+  } else {
+    // text/plain 으로 보내야 Apps Script 가 CORS 사전요청 없이 받아요
+    r = await fetch(cfg.url, { method: "POST", body: JSON.stringify({ action, token: cfg.token, ...extra }) });
+  }
+  return r.json();
+}
+
+function setStatus(st, msg = "") {
+  const b = $("#syncBtn");
+  b.dataset.status = syncOn() ? st : "off";
+  b.title = { off: "동기화 설정", ok: "동기화됨", syncing: "저장 중…", error: `동기화 오류: ${msg}` }[b.dataset.status];
+  const el = $("#syncState");
+  if (el) el.textContent = syncOn() ? { ok: "✓ 연결됨", syncing: "저장 중…", error: `오류: ${msg}` }[st] || "" : "연결 안 됨";
+}
+
+function schedulePush() {
+  if (!syncOn()) return;
+  pendingPush = true;
+  setStatus("syncing");
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(push, 1200);
+}
+async function push() {
+  try {
+    const res = await api("save", { data: state }, "POST");
+    if (!res.ok) throw new Error(res.error);
+    pendingPush = false;
+    if (res.data && (res.data.updatedAt || 0) > (state.updatedAt || 0)) applyRemote(res.data);
+    setStatus("ok");
+  } catch (e) {
+    setStatus("error", e.message);
+    pushTimer = setTimeout(push, 10000); // 잠시 후 다시 시도
+  }
+}
+async function pull() {
+  if (!syncOn() || pendingPush) return;
+  try {
+    const res = await api("load");
+    if (!res.ok) throw new Error(res.error);
+    if (res.data && (res.data.updatedAt || 0) > (state.updatedAt || 0)) applyRemote(res.data);
+    setStatus("ok");
+  } catch (e) {
+    setStatus("error", e.message);
+  }
+}
+function applyRemote(data) {
+  state = data;
+  save(false);
+  renderTop();
+  renderCalendar();
+  renderDay();
+}
+
+/* ---------- 설정 창 ---------- */
+function openSyncSheet() {
+  $("#syncUrl").value = sync.url || "";
+  $("#syncToken").value = sync.token || "";
+  $("#syncCal").checked = sync.calendar !== false;
+  $("#syncDisconnect").classList.toggle("hidden", !syncOn());
+  $("#syncLinkBtn").classList.toggle("hidden", !syncOn());
+  setStatus(syncOn() ? "ok" : "off");
+  $("#syncSheet").classList.remove("hidden");
+  requestAnimationFrame(() => $("#syncSheet").classList.add("show"));
+}
+function closeSyncSheet() {
+  $("#syncSheet").classList.remove("show");
+  setTimeout(() => $("#syncSheet").classList.add("hidden"), 200);
+}
+
+async function connect(cfg, { askConflict = true } = {}) {
+  const ping = await api("ping", {}, "GET", cfg);
+  if (!ping.ok) throw new Error(ping.error === "unauthorized" ? "비밀번호가 맞지 않아요" : ping.error);
+  const res = await api("load", {}, "GET", cfg);
+  if (!res.ok) throw new Error(res.error);
+  sync = cfg;
+  saveSync();
+  const remote = res.data;
+  const localUsed = !!state.updatedAt;
+  if (remote && localUsed && askConflict) {
+    const useRemote = confirm(
+      "구글 드라이브에 이미 저장된 플래너 데이터가 있어요.\n\n" +
+      "[확인] 드라이브 데이터 불러오기 (이 기기 데이터는 덮어써져요)\n" +
+      "[취소] 이 기기 데이터를 드라이브에 올리기"
+    );
+    if (useRemote) applyRemote(remote);
+    else { state.updatedAt = Date.now(); save(false); await push(); }
+  } else if (remote) {
+    applyRemote(remote);
+  } else {
+    state.updatedAt = state.updatedAt || Date.now();
+    save(false);
+    await push();
+  }
+  for (const k in evCache) delete evCache[k];
+  setStatus("ok");
+  renderCalendar();
+  renderDay();
+}
+
+$("#syncForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cfg = {
+    url: $("#syncUrl").value.trim(),
+    token: $("#syncToken").value.trim(),
+    calendar: $("#syncCal").checked,
+  };
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(cfg.url)) {
+    $("#syncState").textContent = "웹 앱 URL 은 https://script.google.com/macros/s/…/exec 형식이에요";
+    return;
+  }
+  if (!cfg.token) { $("#syncToken").focus(); return; }
+  $("#syncState").textContent = "연결 확인 중…";
+  try {
+    await connect(cfg);
+    closeSyncSheet();
+  } catch (err) {
+    $("#syncState").textContent = `연결 실패: ${err.message}`;
+  }
+});
+$("#syncDisconnect").onclick = () => {
+  if (!confirm("이 기기에서 동기화를 끌까요? (드라이브 데이터는 그대로 남아요)")) return;
+  sync = {};
+  saveSync();
+  for (const k in evCache) delete evCache[k];
+  setStatus("off");
+  closeSyncSheet();
+  renderCalendar();
+  renderDay();
+};
+$("#syncLinkBtn").onclick = async () => {
+  const code = btoa(unescape(encodeURIComponent(JSON.stringify(sync))));
+  const link = `${location.origin}${location.pathname}#connect=${code}`;
+  try { await navigator.clipboard.writeText(link); $("#syncState").textContent = "✓ 링크를 복사했어요. 다른 기기 브라우저에서 열면 바로 연결돼요"; }
+  catch { prompt("이 링크를 다른 기기에서 열어 주세요", link); }
+};
+$("#syncBtn").onclick = openSyncSheet;
+$("#syncCancel").onclick = closeSyncSheet;
+$("#syncSheet").addEventListener("click", (e) => { if (e.target.id === "syncSheet") closeSyncSheet(); });
+
+/** 다른 기기 연결 링크(#connect=...)로 들어온 경우 */
+async function handleConnectLink() {
+  const m = location.hash.match(/^#connect=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  try {
+    const cfg = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+    await connect(cfg, { askConflict: !!state.updatedAt });
+  } catch (err) {
+    alert(`동기화 연결 실패: ${err.message}`);
+  }
+}
+
+async function initSync() {
+  $("#syncBtn").innerHTML = `${emo("☁️")}<span class="sync-dot"></span>`;
+  await handleConnectLink();
+  window.addEventListener("hashchange", handleConnectLink);
+  setStatus(syncOn() ? "ok" : "off");
+  if (!syncOn()) return;
+  pull();
+  setInterval(() => { if (document.visibilityState === "visible") pull(); }, 20000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    pull();
+    loadMonthEvents(fromKey(current), true);
+  });
+}
+
+/* ===========================================================
    시작 & 실시간 갱신
    =========================================================== */
 renderTop();
 renderCalendar();
 renderDay();
+initSync();
 
 let tick = 0;
 setInterval(() => {

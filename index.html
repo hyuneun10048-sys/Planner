@@ -18,6 +18,7 @@
       <div class="brand" id="brand"></div>
       <div class="top-actions">
         <button class="pill-btn" id="todayBtn">오늘</button>
+        <button class="round-btn sync-btn" id="syncBtn" data-status="off" title="동기화 설정"></button>
         <button class="round-btn" id="calToggle" title="달력 접기/펼치기"></button>
       </div>
     </header>
@@ -48,6 +49,7 @@
       <div class="day-body">
         <!-- 왼쪽: 할 일 -->
         <div class="todo-col">
+          <div class="events hidden" id="events"></div>
           <div id="sections"></div>
 
           <div class="col-foot">
@@ -94,6 +96,36 @@
         <button type="button" class="sheet-cancel" id="sheetCancel">취소</button>
         <button type="submit" class="sheet-save">저장</button>
       </div>
+    </form>
+  </div>
+
+  <!-- 동기화 & 구글 캘린더 설정 -->
+  <div class="sheet-backdrop hidden" id="syncSheet">
+    <form class="sheet sync-sheet" id="syncForm" autocomplete="off">
+      <div class="sheet-grip"></div>
+      <h3 class="sheet-title">☁️ 동기화 · 구글 캘린더</h3>
+      <p class="sheet-desc">구글 앱스 스크립트를 연결하면 플래너 데이터가 내 구글 드라이브에 저장돼서 <b>어느 브라우저·기기에서든</b> 똑같이 보이고, <b>구글 캘린더 일정</b>도 함께 볼 수 있어요. 설정 방법은 README 를 참고해 주세요.</p>
+
+      <label class="field-label" for="syncUrl">웹 앱 URL</label>
+      <input id="syncUrl" class="field" placeholder="https://script.google.com/macros/s/…/exec" inputmode="url" />
+
+      <label class="field-label" for="syncToken">비밀번호 (스크립트의 TOKEN)</label>
+      <input id="syncToken" class="field" type="password" placeholder="스크립트에 적은 비밀번호" />
+
+      <label class="toggle-row">
+        <input type="checkbox" id="syncCal" checked />
+        <span>구글 캘린더 일정 보기</span>
+      </label>
+
+      <p class="sync-state" id="syncState"></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="sheet-del hidden" id="syncDisconnect">연결 해제</button>
+        <span class="spacer"></span>
+        <button type="button" class="sheet-cancel" id="syncCancel">닫기</button>
+        <button type="submit" class="sheet-save">연결</button>
+      </div>
+      <button type="button" class="link-btn hidden" id="syncLinkBtn">🔗 다른 기기 연결 링크 복사</button>
     </form>
   </div>
 
