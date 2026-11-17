@@ -32,7 +32,9 @@ function handle_(p) {
       case 'load':
         return json_({ ok: true, data: readData_() });
       case 'save':
-        return json_(saveData_(p.data));
+        return json_(saveData_(p.data, false));
+      case 'replace':
+        return json_(saveData_(p.data, true));
       case 'events':
         return json_({ ok: true, events: events_(Number(p.from), Number(p.to)) });
     }
@@ -56,21 +58,68 @@ function readData_() {
   return text ? JSON.parse(text) : null;
 }
 
-function saveData_(data) {
+function saveData_(data, replace) {
   if (!data || typeof data !== 'object') return { ok: false, error: 'no data' };
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const current = readData_();
-    // 서버에 더 최신 데이터가 있으면 덮어쓰지 않고 돌려줌 (다른 기기에서 먼저 저장한 경우)
-    if (current && (current.updatedAt || 0) > (data.updatedAt || 0)) {
-      return { ok: true, data: current };
-    }
-    file_(true).setContent(JSON.stringify(data));
-    return { ok: true };
+    // 여러 기기에서 동시에 고쳐도 항목별로 합쳐서 저장 (replace 면 통째로 교체)
+    const merged = replace ? data : mergeStates(readData_(), data);
+    file_(true).setContent(JSON.stringify(merged));
+    return { ok: true, data: merged };
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ---- 두 기기의 데이터를 항목별로 합치기 (Code.gs 와 같은 코드) ----
+   - 항목마다 u(수정 시각)가 있고, 같은 id 면 더 최근 것을 사용
+   - 지운 항목은 del[id] = 지운 시각 으로 기억해서 다시 살아나지 않게 함 */
+function mergeStates(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  var del = {}, k;
+  [a.del || {}, b.del || {}].forEach(function (d) {
+    for (k in d) del[k] = Math.max(del[k] || 0, d[k]);
+  });
+  var cutoff = Date.now() - 90 * 86400000; // 오래된 삭제 기록은 정리
+  for (k in del) if (del[k] < cutoff) delete del[k];
+  function alive(x) { return !(del[x.id] >= (x.u || 0)); }
+  function pick(xs, ys) {
+    var m = {}, order = [];
+    (xs || []).concat(ys || []).forEach(function (x) {
+      if (!x || !x.id) return;
+      if (!m[x.id]) order.push(x.id);
+      if (!m[x.id] || (x.u || 0) > (m[x.id].u || 0)) m[x.id] = x;
+    });
+    return order.map(function (id) { return m[id]; }).filter(alive);
+  }
+  var newer = (a.orderU || 0) >= (b.orderU || 0) ? a : b;
+  var rank = {};
+  (newer.sections || []).forEach(function (s, i) { rank[s.id] = i; });
+  var sections = pick(a.sections, b.sections).sort(function (x, y) {
+    var rx = x.id in rank ? rank[x.id] : 1e9, ry = y.id in rank ? rank[y.id] : 1e9;
+    return rx - ry;
+  });
+  var todos = {};
+  Object.keys(a.todos || {}).concat(Object.keys(b.todos || {})).forEach(function (day) {
+    if (todos[day]) return;
+    var list = pick((a.todos || {})[day], (b.todos || {})[day]);
+    if (list.length) todos[day] = list;
+  });
+  var logs = pick(a.logs, b.logs).sort(function (x, y) { return x.start - y.start; });
+  var runA = a.runningU || 0, runB = b.runningU || 0;
+  return {
+    v: 3,
+    sections: sections,
+    todos: todos,
+    logs: logs,
+    running: runA >= runB ? (a.running || null) : (b.running || null),
+    runningU: Math.max(runA, runB),
+    orderU: Math.max(a.orderU || 0, b.orderU || 0),
+    del: del,
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+  };
 }
 
 /* ---------- 구글 캘린더 일정 ---------- */

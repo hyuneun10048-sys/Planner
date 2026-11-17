@@ -64,6 +64,64 @@ const korDur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); const h 
 const soft = (hex, a = 0.14) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
 
+/* ---- 두 기기의 데이터를 항목별로 합치기 (Code.gs 와 같은 코드) ----
+   - 항목마다 u(수정 시각)가 있고, 같은 id 면 더 최근 것을 사용
+   - 지운 항목은 del[id] = 지운 시각 으로 기억해서 다시 살아나지 않게 함 */
+function mergeStates(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  var del = {}, k;
+  [a.del || {}, b.del || {}].forEach(function (d) {
+    for (k in d) del[k] = Math.max(del[k] || 0, d[k]);
+  });
+  var cutoff = Date.now() - 90 * 86400000; // 오래된 삭제 기록은 정리
+  for (k in del) if (del[k] < cutoff) delete del[k];
+  function alive(x) { return !(del[x.id] >= (x.u || 0)); }
+  function pick(xs, ys) {
+    var m = {}, order = [];
+    (xs || []).concat(ys || []).forEach(function (x) {
+      if (!x || !x.id) return;
+      if (!m[x.id]) order.push(x.id);
+      if (!m[x.id] || (x.u || 0) > (m[x.id].u || 0)) m[x.id] = x;
+    });
+    return order.map(function (id) { return m[id]; }).filter(alive);
+  }
+  var newer = (a.orderU || 0) >= (b.orderU || 0) ? a : b;
+  var rank = {};
+  (newer.sections || []).forEach(function (s, i) { rank[s.id] = i; });
+  var sections = pick(a.sections, b.sections).sort(function (x, y) {
+    var rx = x.id in rank ? rank[x.id] : 1e9, ry = y.id in rank ? rank[y.id] : 1e9;
+    return rx - ry;
+  });
+  var todos = {};
+  Object.keys(a.todos || {}).concat(Object.keys(b.todos || {})).forEach(function (day) {
+    if (todos[day]) return;
+    var list = pick((a.todos || {})[day], (b.todos || {})[day]);
+    if (list.length) todos[day] = list;
+  });
+  var logs = pick(a.logs, b.logs).sort(function (x, y) { return x.start - y.start; });
+  var runA = a.runningU || 0, runB = b.runningU || 0;
+  return {
+    v: 3,
+    sections: sections,
+    todos: todos,
+    logs: logs,
+    running: runA >= runB ? (a.running || null) : (b.running || null),
+    runningU: Math.max(runA, runB),
+    orderU: Math.max(a.orderU || 0, b.orderU || 0),
+    del: del,
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),
+  };
+}
+
+/** 비교용: 키 순서와 상관없이 같은 내용이면 같은 문자열 */
+function canon(v) {
+  if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canon(v[k])).join(",") + "}";
+  return JSON.stringify(v);
+}
+const normalize = (s) => mergeStates(s && typeof s === "object" ? s : {}, {});
+
 /* ---------- 상태 ---------- */
 function defaultState() {
   return {
@@ -73,17 +131,19 @@ function defaultState() {
       { id: uid(), emoji: "🏃", name: "운동", color: "#f07d12" },
       { id: uid(), emoji: "🏠", name: "개인", color: "#e8467c" },
     ],
-    todos: {},     // { "YYYY-MM-DD": [{ id, sectionId, text, done }] }
-    logs: [],      // [{ id, sectionId, start, end }]
+    todos: {},     // { "YYYY-MM-DD": [{ id, sectionId, text, done, u }] }
+    logs: [],      // [{ id, sectionId, start, end, u }]
     running: null, // { sectionId, start }
-    calOpen: true,
+    runningU: 0,   // running 이 바뀐 시각
+    orderU: 0,     // 섹션 순서가 바뀐 시각
+    del: {},       // { id: 지운 시각 }
   };
 }
 
 function load() {
   try {
     const v2 = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (v2) return v2;
+    if (v2) return normalize(v2);
     const v1 = JSON.parse(localStorage.getItem(OLD_KEY));
     if (v1) { // 이전 버전 데이터 옮기기 (섹션·할 일 유지, 같은 이름의 활동 기록은 섹션으로 연결)
       const s = defaultState();
@@ -96,7 +156,7 @@ function load() {
           if (act && byName[act.name]) s.logs.push({ id: l.id, sectionId: byName[act.name], start: l.start, end: l.end });
         }
       }
-      return s;
+      return normalize(s);
     }
   } catch {}
   return defaultState();
@@ -110,10 +170,21 @@ function save(touch = true) {
 }
 save(false);
 
+/* 수정 시각 기록 도우미 (동기화 때 어느 쪽이 최신인지 판단) */
+const touch = (o) => { o.u = Date.now(); return o; };
+const tomb = (id) => { state.del[id] = Date.now(); };
+
+/* 기기별 화면 설정 (동기화하지 않음) */
+const UI_KEY = "planner.ui";
+const ui = (() => { try { return { calOpen: true, ...JSON.parse(localStorage.getItem(UI_KEY)) }; } catch { return { calOpen: true }; } })();
+const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch {} };
+
 let current = todayKey();
 let viewMonth = fromKey(current); viewMonth.setDate(1);
 let editing = false;
 let openAdd = null;          // 할 일 입력창이 열린 섹션 id
+let justAdded = false;       // 방금 할 일을 추가했으면 입력창 비우기
+let focusAdd = false;        // 입력창에 포커스 주기
 
 const todosOf = (k) => (state.todos[k] ||= []);
 const secById = (id) => state.sections.find((s) => s.id === id) || { id, emoji: "❓", name: "삭제된 섹션", color: "#b8b8b8" };
@@ -140,6 +211,7 @@ function toggleTimer(sectionId) {
     if (r.sectionId === sectionId) { save(); renderDay(); return; } // 같은 섹션 → 종료
   }
   state.running = { sectionId, start: now };                       // 다른 섹션 → 전환
+  state.runningU = now;
   save();
   renderDay();
 }
@@ -147,7 +219,8 @@ function stopTimer(end = Date.now()) {
   const r = state.running;
   if (!r) return;
   state.running = null;
-  if (end - r.start >= 1000) state.logs.push({ id: uid(), sectionId: r.sectionId, start: r.start, end });
+  state.runningU = Date.now();
+  if (end - r.start >= 1000) state.logs.push({ id: uid(), sectionId: r.sectionId, start: r.start, end, u: Date.now() });
 }
 
 /* ===========================================================
@@ -155,12 +228,12 @@ function stopTimer(end = Date.now()) {
    =========================================================== */
 function renderTop() {
   $("#brand").innerHTML = `<span class="logo-b">MY</span><span class="logo-l">PLANNER</span>`;
-  $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${state.calOpen ? "달력 접기" : "달력"}</span>`;
-  $("#calCard").classList.toggle("hidden", !state.calOpen);
+  $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${ui.calOpen ? "달력 접기" : "달력"}</span>`;
+  $("#calCard").classList.toggle("hidden", !ui.calOpen);
 }
 
 function renderCalendar() {
-  if (!state.calOpen) return;
+  if (!ui.calOpen) return;
   const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   $("#calTitle").textContent = `${months[m]} ${y}`;
@@ -204,7 +277,7 @@ $("#calGrid").addEventListener("click", (e) => {
 });
 $("#prevMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() - 1); renderCalendar(); };
 $("#nextMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() + 1); renderCalendar(); };
-$("#calToggle").onclick = () => { state.calOpen = !state.calOpen; save(); renderTop(); renderCalendar(); };
+$("#calToggle").onclick = () => { ui.calOpen = !ui.calOpen; saveUi(); renderTop(); renderCalendar(); };
 $("#todayBtn").onclick = () => goTo(todayKey());
 
 function goTo(k) {
@@ -280,6 +353,11 @@ function renderSections(entries) {
   $("#editToggle").classList.toggle("on", editing);
   $("#editToggle").textContent = editing ? "완료" : "편집";
 
+  // 다시 그려도 입력 중이던 글자는 유지
+  const typing = wrap.querySelector(".add-todo input");
+  const typed = typing ? typing.value : "";
+  const hadFocus = typing && document.activeElement === typing;
+
   if (!state.sections.length) {
     wrap.innerHTML = `<p class="empty-sec">${emo("🌱")} ＋ 섹션으로 시작해 보세요</p>`;
     return;
@@ -308,7 +386,7 @@ function renderSections(entries) {
           ${items.map((t) => `
             <li class="todo ${t.done ? "done" : ""}" data-id="${t.id}">
               <button class="check" data-act="toggle" aria-label="완료">${CHECK_SVG}</button>
-              <span class="todo-text">${esc(t.text)}</span>
+              <span class="todo-text" data-act="edittodo">${esc(t.text)}</span>
               <button class="del" data-act="deltodo" aria-label="삭제">${emo("❌")}</button>
             </li>`).join("")}
         </ul>
@@ -319,7 +397,13 @@ function renderSections(entries) {
       </div>`;
   }).join("");
 
-  if (openAdd) wrap.querySelector(`.section[data-sec="${openAdd}"] .add-todo input`)?.focus();
+  const input = openAdd && wrap.querySelector(`.section[data-sec="${openAdd}"] .add-todo input`);
+  if (input) {
+    if (!justAdded) input.value = typed;
+    if (hadFocus || focusAdd) input.focus();
+  }
+  justAdded = false;
+  focusAdd = false;
 }
 
 $("#sections").addEventListener("click", (e) => {
@@ -344,18 +428,30 @@ $("#sections").addEventListener("click", (e) => {
       const j = btn.dataset.act === "up" ? i - 1 : i + 1;
       if (j < 0 || j >= state.sections.length) return;
       [state.sections[i], state.sections[j]] = [state.sections[j], state.sections[i]];
+      state.orderU = Date.now();
       break;
     }
     case "open-add":
       openAdd = openAdd === secId ? null : secId;
+      focusAdd = !!openAdd;
       break;
     case "toggle": {
       const t = list.find((x) => x.id === todoId);
-      if (t) t.done = !t.done;
+      if (t) { t.done = !t.done; touch(t); }
+      break;
+    }
+    case "edittodo": {
+      if (!editing) return;
+      const t = list.find((x) => x.id === todoId);
+      const text = t && prompt("할 일 수정", t.text);
+      if (!text || !text.trim()) return;
+      t.text = text.trim().slice(0, 120);
+      touch(t);
       break;
     }
     case "deltodo":
       state.todos[current] = list.filter((x) => x.id !== todoId);
+      tomb(todoId);
       break;
     default:
       return;
@@ -370,7 +466,9 @@ $("#sections").addEventListener("submit", (e) => {
   const input = e.target.elements.text;
   const text = input.value.trim();
   if (!text) { openAdd = null; renderDay(); return; }
-  todosOf(current).push({ id: uid(), sectionId: openAdd, text, done: false });
+  todosOf(current).push({ id: uid(), sectionId: openAdd, text, done: false, u: Date.now() });
+  justAdded = true;
+  focusAdd = true;
   save();
   renderCalendar();
   renderDay(); // 입력창은 열린 채로 다시 포커스
@@ -457,8 +555,11 @@ $("#sheetForm").addEventListener("submit", (e) => {
   const name = $("#sheetName").value.trim();
   if (!name) { $("#sheetName").focus(); return; }
   const sec = sheetFor && state.sections.find((s) => s.id === sheetFor);
-  if (sec) Object.assign(sec, { name, emoji: draft.emoji, color: draft.color });
-  else state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color });
+  if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color }));
+  else {
+    state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color, u: Date.now() });
+    state.orderU = Date.now();
+  }
   save();
   closeSheet();
   renderCalendar();
@@ -469,7 +570,12 @@ $("#sheetDelete").onclick = () => {
   if (!sec || !confirm(`'${sec.name}' 섹션을 삭제할까요?\n모든 날짜의 이 섹션 할 일도 함께 지워져요. (시간 기록은 남아요)`)) return;
   if (state.running?.sectionId === sec.id) stopTimer();
   state.sections = state.sections.filter((s) => s.id !== sec.id);
-  for (const k in state.todos) state.todos[k] = state.todos[k].filter((t) => t.sectionId !== sec.id);
+  tomb(sec.id);
+  state.orderU = Date.now();
+  for (const k in state.todos) {
+    state.todos[k].filter((t) => t.sectionId === sec.id).forEach((t) => tomb(t.id));
+    state.todos[k] = state.todos[k].filter((t) => t.sectionId !== sec.id);
+  }
   save();
   closeSheet();
   renderCalendar();
@@ -477,7 +583,11 @@ $("#sheetDelete").onclick = () => {
 };
 $("#sheetCancel").onclick = closeSheet;
 $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").classList.contains("hidden")) closeSheet(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("#sheet").classList.contains("hidden")) closeSheet();
+  if (!$("#syncSheet").classList.contains("hidden")) closeSyncSheet();
+});
 $("#showAddSection").onclick = () => openSheet();
 
 $("#editToggle").onclick = () => { editing = !editing; openAdd = null; renderDay(); };
@@ -541,6 +651,7 @@ $("#logList").addEventListener("click", (e) => {
   const id = b.closest(".log").dataset.id;
   if (!confirm("이 기록을 삭제할까요?")) return;
   state.logs = state.logs.filter((l) => l.id !== id);
+  tomb(id);
   save();
   renderDay();
 });
@@ -627,7 +738,13 @@ async function api(action, extra = {}, method = "GET", cfg = sync) {
     // text/plain 으로 보내야 Apps Script 가 CORS 사전요청 없이 받아요
     r = await fetch(cfg.url, { method: "POST", body: JSON.stringify({ action, token: cfg.token, ...extra }) });
   }
-  return r.json();
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // 로그인 페이지 같은 HTML 이 오면 배포 설정 문제
+    throw new Error("스크립트 응답이 올바르지 않아요. 배포 시 '액세스 권한: 모든 사용자'로 했는지 확인해 주세요");
+  }
 }
 
 function setStatus(st, msg = "") {
@@ -650,7 +767,7 @@ async function push() {
     const res = await api("save", { data: state }, "POST");
     if (!res.ok) throw new Error(res.error);
     pendingPush = false;
-    if (res.data && (res.data.updatedAt || 0) > (state.updatedAt || 0)) applyRemote(res.data);
+    if (res.data) applyMerged(res.data);
     setStatus("ok");
   } catch (e) {
     setStatus("error", e.message);
@@ -662,14 +779,28 @@ async function pull() {
   try {
     const res = await api("load");
     if (!res.ok) throw new Error(res.error);
-    if (res.data && (res.data.updatedAt || 0) > (state.updatedAt || 0)) applyRemote(res.data);
-    setStatus("ok");
+    if (!res.data) return setStatus("ok");
+    const merged = applyMerged(res.data);
+    if (canon(merged) !== canon(normalize(res.data))) schedulePush(); // 이 기기에만 있는 변경이 있으면 올리기
+    else setStatus("ok");
   } catch (e) {
     setStatus("error", e.message);
   }
 }
+/** 서버 데이터와 이 기기 데이터를 항목별로 합치기 */
+function applyMerged(remote) {
+  const merged = mergeStates(state, normalize(remote));
+  if (canon(merged) !== canon(state)) {
+    state = merged;
+    save(false);
+    renderCalendar();
+    renderDay();
+  }
+  return merged;
+}
+/** 서버 데이터로 통째로 바꾸기 (처음 연결할 때만) */
 function applyRemote(data) {
-  state = data;
+  state = normalize(data);
   save(false);
   renderTop();
   renderCalendar();
@@ -708,7 +839,12 @@ async function connect(cfg, { askConflict = true } = {}) {
       "[취소] 이 기기 데이터를 드라이브에 올리기"
     );
     if (useRemote) applyRemote(remote);
-    else { state.updatedAt = Date.now(); save(false); await push(); }
+    else {
+      state.updatedAt = Date.now();
+      save(false);
+      const r = await api("replace", { data: state }, "POST");
+      if (!r.ok) throw new Error(r.error);
+    }
   } else if (remote) {
     applyRemote(remote);
   } else {
@@ -729,7 +865,7 @@ $("#syncForm").addEventListener("submit", async (e) => {
     token: $("#syncToken").value.trim(),
     calendar: $("#syncCal").checked,
   };
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(cfg.url)) {
+  if (!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[^/]+\/exec$/.test(cfg.url)) {
     $("#syncState").textContent = "웹 앱 URL 은 https://script.google.com/macros/s/…/exec 형식이에요";
     return;
   }
@@ -799,8 +935,18 @@ renderDay();
 initSync();
 
 let tick = 0;
+let lastToday = todayKey();
 setInterval(() => {
   tick++;
+  if (tick % 30 === 0) {
+    // 새벽 5시가 지나 하루가 바뀌면, 오늘을 보고 있던 경우 새 날로 이동
+    const tk = todayKey();
+    if (tk !== lastToday) {
+      if (current === lastToday) goTo(tk);
+      lastToday = tk;
+    }
+    if (!state.running) renderTimetable(entriesFor(current)); // 지금 시각 칸 이동
+  }
   if (!state.running) return;
   const entries = entriesFor(current);
   const c = document.getElementById("nowClock");
@@ -814,6 +960,6 @@ setInterval(() => {
 // 다른 탭에서 바뀐 내용 반영
 window.addEventListener("storage", (e) => {
   if (e.key !== STORE_KEY || !e.newValue) return;
-  try { state = JSON.parse(e.newValue); } catch { return; }
+  try { state = normalize(JSON.parse(e.newValue)); } catch { return; }
   renderTop(); renderCalendar(); renderDay();
 });
