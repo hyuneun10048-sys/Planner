@@ -621,9 +621,11 @@ $("#sections").addEventListener("pointerdown", (e) => {
   if (!li || e.button > 0 || e.target.closest(".check, .del, .kcal-val")) return;
   if (editing && e.target.closest(".todo-text")) return; // 편집 모드에선 눌러서 수정
   drag.id = li.dataset.id;
+  drag.li = li;
+  drag.mouse = e.pointerType === "mouse"; // 마우스는 누르고 바로 끌기, 터치는 꾹 누르기
   drag.x0 = e.clientX; drag.y0 = e.clientY;
   clearTimeout(drag.timer);
-  drag.timer = setTimeout(() => startDrag(li, e.clientX, e.clientY), 400);
+  if (!drag.mouse) drag.timer = setTimeout(() => startDrag(li, e.clientX, e.clientY), 400);
 });
 
 function startDrag(li, x, y) {
@@ -696,7 +698,10 @@ function endDrag(cancel) {
 
 document.addEventListener("pointermove", (e) => {
   if (drag.active) { moveDrag(e.clientX, e.clientY); return; }
-  if (drag.id && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 8) { clearTimeout(drag.timer); drag.id = null; } // 스크롤로 판단
+  if (!drag.id) return;
+  const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
+  if (drag.mouse && moved > 5 && drag.li?.isConnected) { startDrag(drag.li, e.clientX, e.clientY); return; }
+  if (!drag.mouse && moved > 8) { clearTimeout(drag.timer); drag.id = null; } // 터치: 스크롤로 판단
 });
 document.addEventListener("pointerup", () => endDrag(false));
 document.addEventListener("pointercancel", () => endDrag(!drag.active));

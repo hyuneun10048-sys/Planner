@@ -644,3 +644,7 @@ select.field:disabled { color: var(--sub); background-color: var(--soft); }
 .kcal-val small { font-size: 10px; }
 .food-dot { margin: 0 4px 0 6px; }
 .kcal-val { padding-right: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .todo { cursor: grab; }
+  .todo .check, .todo .del, .todo .kcal-val { cursor: pointer; }
+}
