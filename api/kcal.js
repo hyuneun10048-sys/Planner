@@ -13,19 +13,19 @@ const GATEWAY = "https://ai-gateway.vercel.sh/v1";
 // 선호 순서: 가볍고 빠른 모델 (목록에 실제로 있는 것만 사용)
 const PREFER = [/^anthropic\/claude-haiku/, /^google\/gemini-[\d.]+-flash(?!-lite|-image)/, /^openai\/gpt-[\d.]+-mini$/];
 
-let cachedModel = null;
-async function pickModel(auth) {
-  if (process.env.AI_GATEWAY_MODEL) return process.env.AI_GATEWAY_MODEL;
-  if (cachedModel) return cachedModel;
+let workingModel = null;   // 한 번 성공한 모델은 계속 사용
+let candidates = null;     // 실행 시 받은 모델 목록에서 고른 후보들
+async function modelCandidates(auth) {
+  if (process.env.AI_GATEWAY_MODEL) return [process.env.AI_GATEWAY_MODEL];
+  if (candidates) return candidates;
   const r = await fetch(`${GATEWAY}/models`, { headers: auth ? { Authorization: `Bearer ${auth}` } : {} });
   if (!r.ok) throw new Error(`모델 목록을 못 불러왔어요 (${r.status})`);
   const ids = ((await r.json()).data || []).map((m) => m.id);
-  for (const re of PREFER) {
-    // 같은 계열이면 버전이 가장 높은(문자열상 뒤쪽) 모델
-    const hit = ids.filter((id) => re.test(id)).sort().reverse()[0];
-    if (hit) return (cachedModel = hit);
-  }
-  throw new Error("쓸 수 있는 모델을 찾지 못했어요");
+  // 계열마다 버전이 높은(문자열상 뒤쪽) 모델 2개씩 → 무료 크레딧에서 안 되는 모델이 있어도 다음 후보로
+  const list = [];
+  for (const re of PREFER) list.push(...ids.filter((id) => re.test(id)).sort().reverse().slice(0, 2));
+  if (!list.length) throw new Error("쓸 수 있는 모델을 찾지 못했어요");
+  return (candidates = list);
 }
 
 // 아주 간단한 요청 제한 (같은 인스턴스에서 IP 당 1분 30회)
@@ -54,31 +54,35 @@ module.exports = async (req, res) => {
   if (!auth) return res.status(500).json({ ok: false, error: "AI Gateway 인증 정보가 없어요" });
 
   try {
-    const model = await pickModel(auth);
-    const r = await fetch(`${GATEWAY}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 120,
-        messages: [
-          {
-            role: "system",
-            content:
-              "너는 한국 식품 영양 전문가야. 사용자가 적은 음식의 총 칼로리(kcal)를 추정해. " +
-              "양이 없으면 한국에서 흔한 1인분/1개 기준으로 계산해. 여러 음식이면 합계를 내. " +
-              '반드시 JSON 한 줄로만 답해: {"kcal": 정수, "note": "기준 양 (10자 이내)"}',
-          },
-          { role: "user", content: food },
-        ],
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = (j.error && (j.error.message || j.error)) || `HTTP ${r.status}`;
-      return res.status(502).json({ ok: false, error: String(msg).slice(0, 200) });
+    const all = await modelCandidates(auth);
+    const order = workingModel ? [workingModel, ...all.filter((m) => m !== workingModel)] : all;
+    let j = null, model = null, lastErr = "";
+    for (const m of order) {
+      const r = await fetch(`${GATEWAY}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: m,
+          temperature: 0,
+          max_tokens: 120,
+          messages: [
+            {
+              role: "system",
+              content:
+                "너는 한국 식품 영양 전문가야. 사용자가 적은 음식의 총 칼로리(kcal)를 추정해. " +
+                "양이 없으면 한국에서 흔한 1인분/1개 기준으로 계산해. 여러 음식이면 합계를 내. " +
+                '반드시 JSON 한 줄로만 답해: {"kcal": 정수, "note": "기준 양 (10자 이내)"}',
+            },
+            { role: "user", content: food },
+          ],
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) { j = body; model = m; workingModel = m; break; }
+      lastErr = (body.error && (body.error.message || body.error)) || `HTTP ${r.status}`;
+      if (r.status === 401 || r.status === 429) break; // 인증 / 한도 문제는 다른 모델로도 안 됨
     }
+    if (!j) return res.status(502).json({ ok: false, error: String(lastErr).slice(0, 200) });
     const text = String(j.choices?.[0]?.message?.content || "");
     let kcal = null, note = "";
     try {
