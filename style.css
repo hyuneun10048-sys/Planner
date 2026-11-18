@@ -34,6 +34,10 @@ button { cursor: pointer; background: none; border: 0; padding: 0; border-radius
   max-width: 860px;
   margin: 0 auto;
   padding: 20px 20px 96px;
+  /* 홈 화면 앱에서 상태바(시계) 아래로 내용이 들어가지 않게 */
+  padding-top: calc(20px + env(safe-area-inset-top));
+  padding-left: calc(20px + env(safe-area-inset-left));
+  padding-right: calc(20px + env(safe-area-inset-right));
 }
 
 /* ---------- 상단 바 ---------- */

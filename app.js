@@ -487,6 +487,8 @@ $("#sections").addEventListener("click", (e) => {
       break;
     }
     case "open-add":
+      // 입력창이 열려 있다가 ＋를 누르는 순간 닫힌 경우엔 다시 열지 않음
+      if (lastAddClose.id === secId && Date.now() - lastAddClose.t < 400) return;
       openAdd = openAdd === secId ? null : secId;
       focusAdd = !!openAdd;
       break;
@@ -530,6 +532,19 @@ $("#sections").addEventListener("submit", (e) => {
 });
 $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
+});
+/* 입력창 밖을 누르면 닫기 (＋를 눌렀을 때만 보이게) */
+let lastAddClose = { id: null, t: 0 };
+$("#sections").addEventListener("focusout", (e) => {
+  if (!e.target.closest(".add-todo")) return;
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (a && a.closest && a.closest(".add-todo")) return; // 할 일 추가 후 다시 그려진 입력창
+    if (!openAdd) return;
+    lastAddClose = { id: openAdd, t: Date.now() };
+    openAdd = null;
+    renderDay();
+  }, 120);
 });
 
 /* ===========================================================
