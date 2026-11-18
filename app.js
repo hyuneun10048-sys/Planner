@@ -52,7 +52,8 @@ function clover(colors, content) {
   const n = colors.length;
   const fill = (i) => (n ? colors[Math.floor((i * n) / 4)] : "#d6d7db");
   let svg = `<svg class="clover" viewBox="0 0 32 32" aria-hidden="true">`;
-  lobes.forEach(([x, y], i) => { svg += `<circle cx="${x}" cy="${y}" r="9" fill="${fill(i)}"/>`; });
+  // 잎은 살짝 투명하게: 겹치는 가운데가 더 진하게 보여요
+  lobes.forEach(([x, y], i) => { svg += `<circle cx="${x}" cy="${y}" r="9" fill="${fill(i)}" fill-opacity="${n ? 0.72 : 1}"/>`; });
   if (content === "check") {
     svg += `<path d="M10.5 16.3l3.8 3.8 7.4-7.6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (content) {
