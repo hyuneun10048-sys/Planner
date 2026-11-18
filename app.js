@@ -780,6 +780,44 @@ $("#winterBtn").onclick = () => {
 /* ===========================================================
    10분 단위 타임테이블
    =========================================================== */
+/**
+ * 한 칸 [a, b) 의 칠하기 계산
+ * - 겹치는 기록은 나중에 시작한 것이 위에 보임
+ * - 섹션 전환 때 생기는 몇 초짜리 빈틈은 메워서 흰 줄이 보이지 않게
+ */
+function cellPaint(entries, a, b) {
+  const segs = [];
+  for (const e of entries) {
+    const x = Math.max(e.s, a), y = Math.min(e.e, b);
+    if (y > x) segs.push({ x, y, start: e.start, color: secById(e.sectionId).color, name: secById(e.sectionId).name, live: !!e.live });
+  }
+  if (!segs.length) return { bg: "", live: false, names: [] };
+  const cuts = [...new Set([a, b, ...segs.flatMap((g) => [g.x, g.y])])].sort((p, q) => p - q);
+  let parts = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const p = cuts[i], q = cuts[i + 1];
+    const top = segs.filter((g) => g.x <= p && g.y >= q).sort((m, n) => n.start - m.start)[0];
+    const color = top ? top.color : null;
+    const last = parts[parts.length - 1];
+    if (last && last.color === color) last.q = q;
+    else parts.push({ p, q, color });
+  }
+  const GAP = 30000; // 30초 이하 빈틈은 메우기
+  parts.forEach((part, i) => {
+    if (part.color || part.q - part.p > GAP) return;
+    const prev = parts[i - 1], next = parts[i + 1];
+    if (prev && prev.color) part.color = prev.color;
+    else if (next && next.color) part.color = next.color;
+  });
+  const pct = (t) => (((t - a) / SLOT) * 100).toFixed(3) + "%";
+  const stops = parts.map((part) => `${part.color || "transparent"} ${pct(part.p)} ${pct(part.q)}`);
+  return {
+    bg: `linear-gradient(90deg, ${stops.join(", ")})`,
+    live: segs.some((g) => g.live),
+    names: [...new Set(segs.map((g) => g.name))],
+  };
+}
+
 function renderTimetable(entries) {
   const [ws] = dayWindow(current);
   const now = Date.now();
@@ -791,21 +829,9 @@ function renderTimetable(entries) {
     html += `<div class="tt-h ${first}">${label}</div>`;
     for (let s = 0; s < 6; s++) {
       const a = ws + (h * 6 + s) * SLOT, b = a + SLOT;
-      // 한 칸(10분) 안에 여러 섹션이 있으면 실제 시간 위치대로 나눠서 칠함
-      let inner = "", live = false;
-      const names = [];
-      for (const e of entries) {
-        const x = Math.max(e.s, a), y = Math.min(e.e, b);
-        if (y <= x) continue;
-        if (e.live) live = true;
-        const sec = secById(e.sectionId);
-        if (!names.includes(sec.name)) names.push(sec.name);
-        const left = ((x - a) / SLOT) * 100, width = ((y - x) / SLOT) * 100;
-        if (width < 0.5) continue; // 몇 초짜리 조각은 생략
-        // 칸 경계에서 시작/끝나면 테두리까지 덮어서 칸 사이 흰 줄이 굵게 보이지 않게
-        const atStart = left < 0.01, atEnd = left + width > 99.99;
-        inner += `<i class="${atStart ? "s" : ""} ${e.live ? "lv" : ""}" style="--c:${sec.color};left:${atStart ? "-1px" : left + "%"};width:calc(${width}% + ${atStart ? 1 : 0}px)${atEnd ? "" : ""}"></i>`;
-      }
+      // 한 칸(10분)을 한 장의 그라데이션으로 칠함 → 섹션이 바뀌는 지점에 틈(흰 줄)이 생기지 않음
+      const { bg, live, names } = cellPaint(entries, a, b);
+      const inner = bg ? `<i class="${live ? "lv" : ""}" style="background:${bg}"></i>` : "";
       const best = names.length;
       const isNow = now >= a && now < b;
       const idx = h * 6 + s;
