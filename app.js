@@ -958,7 +958,14 @@ function renderTimetable(entries) {
       const a = ws + (h * 6 + s) * SLOT, b = a + SLOT;
       // 한 칸(10분)을 한 장의 그라데이션으로 칠함 → 섹션이 바뀌는 지점에 틈(흰 줄)이 생기지 않음
       const { bg, live, names } = cellPaint(entries, a, b);
-      const inner = bg ? `<i class="${live ? "lv" : ""}" style="background:${bg}"></i>` : "";
+      let inner = bg ? `<i class="${live ? "lv" : ""}" style="background:${bg}"></i>` : "";
+      // 🏷 이 칸에서 시작하는 기록의 태그: 칸 안에서 시작 위치에 맞춰 라벨 (오른쪽 칸들 위로 이어짐)
+      for (const e of entries) {
+        if (!e.memo || e.s < a || e.s >= b) continue;
+        const pct = ((e.s - a) / SLOT) * 100;
+        const color = secById(e.sectionId).color;
+        inner += `<span class="tt-tag ${isLight(color) ? "light" : ""}" style="--c:${color};left:${pct.toFixed(2)}%;max-width:calc(${(6 - s) * 100 - pct}% - 2px)">${esc(e.memo)}</span>`;
+      }
       const best = names.length;
       const isNow = now >= a && now < b;
       const idx = h * 6 + s;
@@ -976,24 +983,13 @@ function drawTimedEvents() {
   if (!layer) return;
   const [ws, we] = dayWindow(current);
   const events = timedEventsBetween(ws, we);
-  const tagged = entriesFor(current).filter((e) => e.memo);
-  if (!events.length && !tagged.length) { layer.innerHTML = ""; return; }
+  if (!events.length) { layer.innerHTML = ""; return; }
   const cells = $("#timetable").querySelectorAll(".tt-c");
   if (cells.length < 144) return;
   const first = cells[0], last = cells[5];
   const left0 = first.offsetLeft;
   const width = last.offsetLeft + last.offsetWidth - left0;
   let html = "";
-  // 🏷 메모(태그)가 있는 기록: 구글 캘린더처럼 시작 위치에 라벨
-  for (const e of tagged) {
-    const h = Math.floor((e.s - ws) / HOUR);
-    if (h < 0 || h > 23) continue;
-    const rs = ws + h * HOUR;
-    const row = cells[h * 6];
-    const x = left0 + ((e.s - rs) / HOUR) * width;
-    const color = secById(e.sectionId).color;
-    html += `<div class="tt-tag ${isLight(color) ? "light" : ""}" style="--c:${color};left:${x}px;top:${row.offsetTop}px;max-width:${left0 + width - x}px" title="${esc(e.memo)}">${esc(e.memo)}</div>`;
-  }
   for (const ev of events) {
     const s = Math.max(ev.start, ws), e = Math.min(ev.end, we);
     let labelled = false;
