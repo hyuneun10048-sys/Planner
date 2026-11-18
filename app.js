@@ -964,7 +964,10 @@ function renderTimetable(entries) {
         if (!e.memo || e.s < a || e.s >= b) continue;
         const pct = ((e.s - a) / SLOT) * 100;
         const color = secById(e.sectionId).color;
-        inner += `<span class="tt-tag ${isLight(color) ? "light" : ""}" style="--c:${color};left:${pct.toFixed(2)}%;max-width:calc(${(6 - s) * 100 - pct}% - 2px)">${esc(e.memo)}</span>`;
+        // 구글 캘린더처럼: 배경 없이 글자만, 그 줄에서 일정이 칠해진 범위 안에서만 (넘치면 …)
+        const rowEnd = ws + (h + 1) * HOUR;
+        const span = ((Math.min(e.e, rowEnd) - e.s) / SLOT) * 100;
+        inner += `<span class="tt-tag ${isLight(color) ? "light" : ""}" style="left:${pct.toFixed(2)}%;width:${span.toFixed(2)}%">${esc(e.memo)}</span>`;
       }
       const best = names.length;
       const isNow = now >= a && now < b;
