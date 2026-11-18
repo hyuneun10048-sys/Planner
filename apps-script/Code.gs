@@ -280,6 +280,7 @@ function syncLogs_(data) {
       } else {
         ev = cal.createEvent(title, new Date(l.start), new Date(l.end), { description: 'My Planner 시간 기록' });
         ev.setTag(LOG_TAG, String(l.id));
+        try { ev.removeAllReminders(); } catch (e) {} // 지난 기록이라 알림은 필요 없음
       }
       // 일정 색은 따로 정하지 않음 → 캘린더 원래 색을 따라감
       map[l.id] = { eventId: ev.getId(), calId: calId, sig: sig, nc: 1 };
