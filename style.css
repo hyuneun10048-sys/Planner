@@ -467,8 +467,7 @@ button { cursor: pointer; background: none; border: 0; padding: 0; border-radius
 .tt-ev {
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid var(--ink);
-  background: repeating-linear-gradient(135deg, rgba(17,17,17,.16) 0 3px, transparent 3px 7px);
+  background: var(--ink);
   overflow: hidden;
 }
 .tt-ev span {
