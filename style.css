@@ -654,15 +654,18 @@ select.field:disabled { color: var(--sub); background-color: var(--soft); }
 .log .memo { font-weight: 600; font-size: 13px; color: #555; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .log .memo::before { content: "· "; color: var(--faint); }
 
-/* ---------- 🏷 기록 태그: 구글 캘린더처럼 블록 왼쪽 위에 글자만 ---------- */
+/* ---------- 🏷 기록 태그: 연한(반투명 흰) 배경 + 검정 글자 → 어떤 섹션 색 위에서도 잘 보임 ---------- */
 .tt-tag {
-  position: absolute; z-index: 3; top: 0;
+  position: absolute; z-index: 3; top: 50%; transform: translateY(-50%);
   box-sizing: border-box;
-  padding: 2px 0 0 4px;
-  color: #fff;
-  font-size: 10px; font-weight: 700; line-height: 1.2;
+  display: block; height: 16px; line-height: 16px;
+  padding: 0 4px;
+  margin-left: 2px;
+  background: rgba(255, 255, 255, .62);
+  color: #111;
+  font-size: 10px; font-weight: 800;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
 }
-.tt-tag.light { color: #1f2a37; }
+.tt-tag.light { color: #111; }
 .tt-ev { z-index: 2; }
