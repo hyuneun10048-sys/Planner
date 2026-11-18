@@ -946,8 +946,10 @@ function cellPaint(entries, a, b) {
 }
 
 function renderTimetable(entries) {
-  const [ws] = dayWindow(current);
+  const [ws, we] = dayWindow(current);
   const now = Date.now();
+  // 시간이 정해진 구글 캘린더 일정: 칸 안에 직접 그려서 기록 칸과 정확히 같은 위치
+  const gevs = calendarOn() ? timedEventsBetween(ws, we) : [];
   let html = "";
   for (let h = 0; h < 24; h++) {
     const hour = (DAY_START_HOUR + h) % 24;
@@ -959,6 +961,18 @@ function renderTimetable(entries) {
       // 한 칸(10분)을 한 장의 그라데이션으로 칠함 → 섹션이 바뀌는 지점에 틈(흰 줄)이 생기지 않음
       const { bg, live, names } = cellPaint(entries, a, b);
       let inner = bg ? `<i class="${live ? "lv" : ""}" style="background:${bg}"></i>` : "";
+      for (const ev of gevs) {
+        const x = Math.max(ev.start, a), y = Math.min(ev.end, b);
+        if (y <= x) continue;
+        const left = ((x - a) / SLOT) * 100, width = ((y - x) / SLOT) * 100;
+        inner += `<b class="tt-evf" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></b>`;
+        // 라벨: 일정이 시작하는 칸 (하루 시작 전에 시작한 일정은 첫 칸)
+        if ((ev.start >= a && ev.start < b) || (ev.start < ws && a === ws)) {
+          const rowEnd = ws + (h + 1) * HOUR;
+          const span = ((Math.min(ev.end, rowEnd) - x) / SLOT) * 100;
+          inner += `<span class="tt-evl" style="left:${left.toFixed(2)}%;max-width:${Math.max(span, 60).toFixed(2)}%" title="${esc(ev.title || "")} ${hm(ev.start)}–${hm(ev.end)}">${esc(ev.title || "(제목 없음)")}</span>`;
+        }
+      }
       // 🏷 이 칸에서 시작하는 기록의 태그: 칸 안에서 시작 위치에 맞춰 라벨 (오른쪽 칸들 위로 이어짐)
       for (const e of entries) {
         if (!e.memo || e.s < a || e.s >= b) continue;
@@ -976,40 +990,11 @@ function renderTimetable(entries) {
       html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""} ${picked ? "pick" : ""}" data-i="${idx}" ${best ? `title="${esc(names.join(" · "))}"` : ""}>${inner}</div>`;
     }
   }
-  $("#timetable").innerHTML = html + `<div class="tt-events" id="ttEvents"></div>`;
-  drawTimedEvents();
+  $("#timetable").innerHTML = html;
 }
 
-/** 시간이 정해진 구글 캘린더 일정을 타임테이블 위에 겹쳐 그리기 (한 시간 줄마다 한 조각) */
-function drawTimedEvents() {
-  const layer = document.getElementById("ttEvents");
-  if (!layer) return;
-  const [ws, we] = dayWindow(current);
-  const events = timedEventsBetween(ws, we);
-  if (!events.length) { layer.innerHTML = ""; return; }
-  const cells = $("#timetable").querySelectorAll(".tt-c");
-  if (cells.length < 144) return;
-  const first = cells[0], last = cells[5];
-  const left0 = first.offsetLeft;
-  const width = last.offsetLeft + last.offsetWidth - left0;
-  let html = "";
-  for (const ev of events) {
-    const s = Math.max(ev.start, ws), e = Math.min(ev.end, we);
-    let labelled = false;
-    for (let h = 0; h < 24; h++) {
-      const rs = ws + h * HOUR, re = rs + HOUR;
-      const a = Math.max(s, rs), b = Math.min(e, re);
-      if (b <= a) continue;
-      const row = cells[h * 6];
-      const x = left0 + ((a - rs) / HOUR) * width;
-      const w = Math.max(4, ((b - a) / HOUR) * width);
-      const label = labelled ? "" : `<span>${esc(ev.title || "(제목 없음)")}</span>`;
-      labelled = true;
-      html += `<div class="tt-ev" style="left:${x}px;top:${row.offsetTop}px;width:${w}px;height:${row.offsetHeight}px" title="${esc(ev.title || "")} ${hm(ev.start)}–${hm(ev.end)}">${label}</div>`;
-    }
-  }
-  layer.innerHTML = html;
-}
+/** 구글 캘린더 일정이 바뀌면 타임테이블 다시 그리기 (일정은 칸 안에 그려짐) */
+function drawTimedEvents() { renderTimetable(entriesFor(current)); }
 
 /** 밝은 색이면 글자를 검정으로 */
 function isLight(hex) {
@@ -1033,8 +1018,7 @@ function timedEventsBetween(from, to) {
   }
   return out.sort((a, b) => a.start - b.start);
 }
-let resizeTimer = null;
-window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawTimedEvents, 150); });
+
 
 /* ===========================================================
    기록 목록
