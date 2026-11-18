@@ -386,7 +386,7 @@ function renderNowBar() {
   bar.style.setProperty("--c", sec.color);
   bar.style.setProperty("--cbg", soft(sec.color));
   bar.innerHTML = `
-    <span class="runner" aria-label="기록 중">${emo("🏃")}</span>
+    <span class="dot"></span>
     <span class="what">${emo(sec.emoji)} ${esc(sec.name)}<span class="since">${hm(r.start)}부터</span></span>
     <span class="clock" id="nowClock">${clock(Date.now() - r.start)}</span>
     <button class="stop" id="stopBtn">종료</button>`;
