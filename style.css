@@ -625,3 +625,22 @@ select.field:disabled { color: var(--sub); background-color: var(--soft); }
 #evForm { --c: var(--ink); }
 #evTimes.hidden { display: none !important; }
 .sheet-cal { margin-top: 4px; }
+
+/* ---------- 🍽️ 식단 (칼로리) 섹션 ---------- */
+.kcal-sum { font-variant-numeric: tabular-nums; }
+.kcal-sum small, .kcal-val small { font-size: .75em; font-weight: 700; color: var(--sub); }
+.kcal-item { align-items: center; }
+.food-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; margin: 0 7px; }
+.food-note { display: block; font-size: 11px; color: var(--sub); font-weight: 600; margin-top: 1px; }
+.kcal-val {
+  flex: none; min-width: 64px; text-align: right;
+  font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums;
+  padding: 2px 0;
+}
+.kcal-val:hover { text-decoration: underline; }
+.kcal-val.pending { color: var(--sub); font-weight: 600; font-size: 12px; animation: blink 1s ease-in-out infinite; }
+.kcal-item { gap: 6px; }
+.kcal-val { white-space: nowrap; min-width: 0; font-size: 13.5px; }
+.kcal-val small { font-size: 10px; }
+.food-dot { margin: 0 4px 0 6px; }
+.kcal-val { padding-right: 2px; }

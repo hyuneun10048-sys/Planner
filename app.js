@@ -220,6 +220,14 @@ function winterize() {
 }
 if (winterize()) save(false);
 
+/* 🍽️ 칼로리 섹션(식단): 시간 기록·구글 캘린더 없이 음식과 칼로리만 */
+const isKcalSec = (id) => (state.sections.find((x) => x.id === id) || {}).kind === "kcal";
+const DIET_ID = "sec-diet"; // 기기마다 같은 id → 동기화해도 하나만 생김
+if (!state.sections.some((x) => x.id === DIET_ID || x.name === "식단") && !state.del[DIET_ID]) {
+  state.sections.push({ id: DIET_ID, emoji: "🍽️", name: "식단", color: "#b08968", kind: "kcal", calId: null, u: 1 });
+  save(false);
+}
+
 /* 같은 섹션 기록이 거의 붙어 있으면(3분 이하 간격·겹침) 하나로 합치기
    → 구글 캘린더에도 쪼개진 일정 대신 하나의 일정으로 들어감 */
 const MERGE_GAP = 3 * 60000;
@@ -275,6 +283,7 @@ function entriesFor(k) {
    타이머
    =========================================================== */
 function toggleTimer(sectionId) {
+  if (isKcalSec(sectionId)) return;
   const now = Date.now();
   const r = state.running;
   if (r) {
@@ -323,7 +332,7 @@ function renderCalendar() {
   for (let d = 1; d <= days; d++) {
     const k = dateKey(new Date(y, m, d));
     const dow = (first + d - 1) % 7;
-    const list = state.todos[k] || [];
+    const list = (state.todos[k] || []).filter((t) => !isKcalSec(t.sectionId));
     const done = list.filter((t) => t.done);
     const left = list.length - done.length;
 
@@ -450,16 +459,20 @@ function renderSections(entries) {
   wrap.innerHTML = state.sections.map((sec) => {
     const items = sortTodos(list).filter((t) => t.sectionId === sec.id);
     const running = state.running?.sectionId === sec.id;
+    const kcalSec = sec.kind === "kcal";
+    const kcalSum = kcalSec ? items.reduce((n, t) => n + (Number(t.kcal) || 0), 0) : 0;
     return `
-      <div class="section ${running ? "running" : ""}" data-sec="${sec.id}" style="--c:${sec.color}">
+      <div class="section ${running ? "running" : ""} ${kcalSec ? "kcal-sec" : ""}" data-sec="${sec.id}" style="--c:${sec.color}">
         <div class="sec-head">
-          <button class="sec-main" data-act="timer" title="눌러서 시간 기록 시작/종료">
+          <button class="sec-main" data-act="${kcalSec ? "open-add" : "timer"}" title="${kcalSec ? "눌러서 음식 추가" : "눌러서 시간 기록 시작/종료"}">
             <span class="sec-bar"></span>
             ${emo(sec.emoji)}
             <span class="sec-name">${esc(sec.name)}</span>
-            <span class="sec-time" data-time="${sec.id}">${clock(totals[sec.id] || 0)}</span>
+            ${kcalSec
+              ? `<span class="sec-time kcal-sum">${kcalSum.toLocaleString()}<small> kcal</small></span>`
+              : `<span class="sec-time" data-time="${sec.id}">${clock(totals[sec.id] || 0)}</span>`}
           </button>
-          <button class="sec-add" data-act="open-add" aria-label="할 일 추가">＋</button>
+          <button class="sec-add" data-act="open-add" aria-label="${kcalSec ? "음식 추가" : "할 일 추가"}">＋</button>
           <span class="sec-tools">
             <button class="tool arrow-tool" data-act="up" title="위로">↑</button>
             <button class="tool arrow-tool" data-act="down" title="아래로">↓</button>
@@ -467,7 +480,14 @@ function renderSections(entries) {
           </span>
         </div>
         <ul class="todo-list">
-          ${items.map((t) => `
+          ${items.map((t) => kcalSec ? `
+            <li class="todo kcal-item" data-id="${t.id}">
+              <span class="food-dot"></span>
+              <span class="todo-text" data-act="edittodo">${esc(t.text)}${t.note ? `<small class="food-note">${esc(t.note)}</small>` : ""}</span>
+              <button class="kcal-val ${kcalPending.has(t.id) ? "pending" : ""}" data-act="editkcal" title="눌러서 칼로리 직접 입력">${
+                kcalPending.has(t.id) ? "계산 중…" : Number.isFinite(t.kcal) ? `${t.kcal.toLocaleString()}<small> kcal</small>` : "입력"}</button>
+              <button class="del" data-act="deltodo" aria-label="삭제">${emo("❌")}</button>
+            </li>` : `
             <li class="todo ${t.done ? "done" : ""}" data-id="${t.id}">
               <button class="check" data-act="toggle" aria-label="완료">${CHECK_SVG}</button>
               <span class="todo-text" data-act="edittodo">${esc(t.text)}</span>
@@ -476,7 +496,7 @@ function renderSections(entries) {
         </ul>
         ${openAdd === sec.id ? `
           <form class="add-todo" autocomplete="off">
-            <input name="text" placeholder="할 일 입력 후 Enter" maxlength="120" />
+            <input name="text" placeholder="${kcalSec ? "음식 입력 후 Enter (예: 김치찌개 1인분)" : "할 일 입력 후 Enter"}" maxlength="120" />
           </form>` : ""}
       </div>`;
   }).join("");
@@ -529,9 +549,24 @@ $("#sections").addEventListener("click", (e) => {
     case "edittodo": {
       if (!editing) return;
       const t = list.find((x) => x.id === todoId);
-      const text = t && prompt("할 일 수정", t.text);
-      if (!text || !text.trim()) return;
+      const kcalItem = t && isKcalSec(t.sectionId);
+      const text = t && prompt(kcalItem ? "음식 수정 (바꾸면 칼로리를 다시 계산해요)" : "할 일 수정", t.text);
+      if (!text || !text.trim() || text.trim() === t.text) return;
       t.text = text.trim().slice(0, 120);
+      touch(t);
+      if (kcalItem) estimateKcal(t);
+      break;
+    }
+    case "editkcal": {
+      const t = list.find((x) => x.id === todoId);
+      if (!t) return;
+      const v = prompt(`'${t.text}' 칼로리 (kcal)\n비워 두면 AI 가 다시 계산해요`, Number.isFinite(t.kcal) ? t.kcal : "");
+      if (v === null) return;
+      if (v.trim() === "") { estimateKcal(t); break; }
+      const n = Math.round(Number(v.replace(/[^\d.]/g, "")));
+      if (!Number.isFinite(n)) return;
+      t.kcal = n;
+      t.note = "직접 입력";
       touch(t);
       break;
     }
@@ -552,7 +587,14 @@ $("#sections").addEventListener("submit", (e) => {
   const input = e.target.elements.text;
   const text = input.value.trim();
   if (!text) { openAdd = null; renderDay(); return; }
-  todosOf(current).push({ id: uid(), sectionId: openAdd, text, done: false, u: Date.now() });
+  const item = { id: uid(), sectionId: openAdd, text, done: false, u: Date.now() };
+  if (isKcalSec(openAdd)) {
+    // "샐러드 350" 처럼 숫자를 직접 적으면 AI 없이 그 칼로리로
+    const m = text.match(/^(.*?)[\s,]*(\d{1,5})\s*(kcal|칼로리|cal)?$/i);
+    if (m && m[1].trim()) { item.text = m[1].trim(); item.kcal = Number(m[2]); }
+    else estimateKcal(item);
+  }
+  todosOf(current).push(item);
   justAdded = true;
   focusAdd = true;
   save();
@@ -562,6 +604,40 @@ $("#sections").addEventListener("submit", (e) => {
 $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
+/* 🍽️ AI 칼로리 추정 (/api/kcal → Vercel AI Gateway). 같은 음식은 기기에 기억해서 다시 묻지 않음 */
+const kcalPending = new Set();
+const KCAL_CACHE_KEY = "planner.kcalCache";
+const kcalCache = (() => { try { return JSON.parse(localStorage.getItem(KCAL_CACHE_KEY)) || {}; } catch { return {}; } })();
+const findTodo = (id) => { for (const k in state.todos) { const x = state.todos[k].find((y) => y.id === id); if (x) return x; } return null; };
+async function estimateKcal(t) {
+  const key = t.text.trim().toLowerCase();
+  if (kcalCache[key]) {
+    Object.assign(t, { kcal: kcalCache[key].kcal, note: kcalCache[key].note || "" });
+    touch(t);
+    return;
+  }
+  kcalPending.add(t.id);
+  try {
+    const r = await fetch("/api/kcal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ food: t.text }) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    t = findTodo(t.id) || t; // 기다리는 동안 동기화로 바뀌었을 수 있음
+    t.kcal = j.kcal;
+    t.note = j.note ? `AI · ${j.note}` : "AI 추정";
+    kcalCache[key] = { kcal: j.kcal, note: t.note };
+    try { localStorage.setItem(KCAL_CACHE_KEY, JSON.stringify(kcalCache)); } catch {}
+  } catch (e) {
+    t = findTodo(t.id) || t;
+    t.note = "자동 계산 실패 · 눌러서 입력";
+    console.warn("칼로리 계산 실패:", e.message);
+  } finally {
+    kcalPending.delete(t.id);
+    touch(t);
+    save();
+    renderDay();
+  }
+}
+
 /* 할 일 순서: o(순서 값)가 있으면 그 순서, 없으면 추가한 순서 */
 function sortTodos(list) {
   return list
@@ -577,7 +653,7 @@ const drag = { timer: null, id: null, x0: 0, y0: 0, ghost: null, active: false, 
 
 $("#sections").addEventListener("pointerdown", (e) => {
   const li = e.target.closest(".todo");
-  if (!li || e.button > 0 || e.target.closest(".check, .del")) return;
+  if (!li || e.button > 0 || e.target.closest(".check, .del, .kcal-val")) return;
   if (editing && e.target.closest(".todo-text")) return; // 편집 모드에선 눌러서 수정
   drag.id = li.dataset.id;
   drag.x0 = e.clientX; drag.y0 = e.clientY;
@@ -689,11 +765,11 @@ function openSheet(secId = null) {
   sheetFor = secId;
   const sec = secId && state.sections.find((s) => s.id === secId);
   if (sec) {
-    draft = { emoji: sec.emoji, color: sec.color };
+    draft = { emoji: sec.emoji, color: sec.color, kind: sec.kind || "" };
     $("#sheetName").value = sec.name;
   } else {
     const used = new Set(state.sections.map((s) => s.color));
-    draft = { emoji: "❄️", color: WINTER_ORDER.find((c) => !used.has(c)) || PALETTE[0] };
+    draft = { emoji: "❄️", color: WINTER_ORDER.find((c) => !used.has(c)) || PALETTE[0], kind: "" };
     $("#sheetName").value = "";
   }
   $("#sheetTitle").textContent = sec ? "섹션 설정" : "새 섹션";
@@ -707,7 +783,8 @@ function openSheet(secId = null) {
 }
 function paintSheetCal(selected) {
   const wrap = $("#sheetCalWrap");
-  wrap.classList.toggle("hidden", !syncOn());
+  $("#sheetKcal").checked = draft.kind === "kcal";
+  wrap.classList.toggle("hidden", !syncOn() || draft.kind === "kcal");
   $("#sheetCal").innerHTML = calOptions(selected || "", { none: true });
   $("#sheetCalMsg").textContent = calListError ? `캘린더 목록을 못 불러왔어요: ${calListError}` : (calList.length ? "" : "캘린더 목록 불러오는 중…");
 }
@@ -766,11 +843,12 @@ $("#sheetForm").addEventListener("submit", (e) => {
   const name = $("#sheetName").value.trim();
   if (!name) { $("#sheetName").focus(); return; }
   const sec = sheetFor && state.sections.find((s) => s.id === sheetFor);
-  const calId = syncOn() ? ($("#sheetCal").value || null) : undefined;
+  const kind = $("#sheetKcal").checked ? "kcal" : "";
+  const calId = kind === "kcal" ? null : syncOn() ? ($("#sheetCal").value || null) : undefined;
   const calPart = calId === undefined ? {} : { calId };
-  if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color }, calPart));
+  if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color, kind }, calPart));
   else {
-    state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color, ...calPart, u: Date.now() });
+    state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color, kind, ...calPart, u: Date.now() });
     state.orderU = Date.now();
   }
   save();
@@ -1028,7 +1106,7 @@ function openLogSheet({ id = null, start, end }) {
   if (log) { start = log.start; end = log.end; logSec = log.sectionId; }
   else if (!state.sections.some((s) => s.id === logSec)) {
     logSec = (state.logs[state.logs.length - 1] || {}).sectionId;
-    if (!state.sections.some((s) => s.id === logSec)) logSec = state.sections[0].id;
+    if (!state.sections.some((s) => s.id === logSec && s.kind !== "kcal")) logSec = (state.sections.find((s) => s.kind !== "kcal") || state.sections[0]).id;
   }
   $("#logTitle").textContent = log ? "기록 수정" : "시간 기록 추가";
   $("#logDelete").classList.toggle("hidden", !log);
@@ -1046,7 +1124,7 @@ function closeLogSheet() {
 function paintLogSecs() {
   const sec = secById(logSec);
   $("#logForm").style.setProperty("--c", sec.color);
-  $("#logSecs").innerHTML = state.sections.map((s) => `
+  $("#logSecs").innerHTML = state.sections.filter((s) => s.kind !== "kcal").map((s) => `
     <button type="button" class="sec-chip ${s.id === logSec ? "on" : ""}" data-id="${s.id}" style="--c:${s.color}">
       ${emo(s.emoji)}<span>${esc(s.name)}</span>
     </button>`).join("");
@@ -1178,7 +1256,7 @@ async function autoAssignCalendars() {
   let changed = false;
   const byName = (n) => calList.find((c) => c.name.trim().toLowerCase() === String(n).trim().toLowerCase());
   for (const sec of state.sections) {
-    if (sec.calId !== undefined) continue; // 직접 고른(또는 '안 넣기') 섹션은 그대로
+    if (sec.calId !== undefined || sec.kind === "kcal") continue; // 직접 고른(또는 '안 넣기') 섹션, 식단은 그대로
     let cal = byName(AUTO_CAL[sec.name] || sec.name);
     if (!cal && AUTO_CREATE.includes(sec.name)) {
       try {
@@ -1566,4 +1644,9 @@ window.addEventListener("storage", (e) => {
   if (e.key !== STORE_KEY || !e.newValue) return;
   try { state = normalize(JSON.parse(e.newValue)); } catch { return; }
   renderTop(); renderCalendar(); renderDay();
+});
+
+$("#sheetKcal").addEventListener("change", () => {
+  draft.kind = $("#sheetKcal").checked ? "kcal" : "";
+  $("#sheetCalWrap").classList.toggle("hidden", !syncOn() || draft.kind === "kcal");
 });
