@@ -193,6 +193,29 @@ save(false);
 const touch = (o) => { o.u = Date.now(); return o; };
 const tomb = (id) => { state.del[id] = Date.now(); };
 
+/* ❄️ 예전 팔레트 색 → 겨울 색 (한 번만 바뀌고, 이미 겨울 색이면 그대로) */
+const OLD_TO_WINTER = {
+  "#a24bd1": "#3b6ea5", "#14a5b5": "#2f5d50", "#f07d12": "#9b2335", "#e8467c": "#7a5c4e",
+  "#6b5cc4": "#5e5873", "#4a7cf0": "#6fa8dc", "#2fb36b": "#7a9e83", "#8bbf3f": "#4f8a9a",
+  "#e3b021": "#b08968", "#e85d3f": "#c94c4c", "#d77fb4": "#d99a9a", "#8a5a3c": "#8e8aa8",
+  "#c8a27a": "#a9c8e8", "#7b8794": "#9aa5b1", "#191919": "#1f3a5f",
+};
+const OLD_TO_WINTER_EMOJI = { "🏃": "⛸️", "🏠": "☕" };
+function winterize() {
+  let changed = false;
+  for (const sec of state.sections) {
+    const c = OLD_TO_WINTER[(sec.color || "").toLowerCase()];
+    if (c) {
+      sec.color = c;
+      if (OLD_TO_WINTER_EMOJI[sec.emoji]) sec.emoji = OLD_TO_WINTER_EMOJI[sec.emoji];
+      touch(sec);
+      changed = true;
+    }
+  }
+  return changed;
+}
+if (winterize()) save(false);
+
 /* 기기별 화면 설정 (동기화하지 않음) */
 const UI_KEY = "planner.ui";
 const ui = (() => { try { return { calOpen: true, ...JSON.parse(localStorage.getItem(UI_KEY)) }; } catch { return { calOpen: true }; } })();
@@ -1017,6 +1040,7 @@ function applyMerged(remote) {
 function applyRemote(data) {
   state = normalize(data);
   save(false);
+  if (winterize()) save();
   renderTop();
   renderCalendar();
   renderDay();
