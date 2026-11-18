@@ -266,7 +266,7 @@ function syncLogs_(data) {
       if (!cal) return; // 캘린더 연결 안 한 섹션 → 아래에서 기존 일정 정리
       keep[l.id] = true;
       const calId = cal.getId();
-      const title = ((sec.emoji || '') + ' ' + sec.name).trim();
+      const title = ((sec.emoji || '') + ' ' + sec.name).trim() + (l.memo ? ' · ' + l.memo : '');
       const sig = [calId, l.start, l.end, title].join('|');
       // nc: 색을 따로 칠하지 않은(캘린더 색을 따르는) 일정이라는 표시
       if (m && m.sig === sig && m.nc) return;

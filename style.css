@@ -648,3 +648,8 @@ select.field:disabled { color: var(--sub); background-color: var(--soft); }
   .todo { cursor: grab; }
   .todo .check, .todo .del, .todo .kcal-val { cursor: pointer; }
 }
+
+/* 기록 메모 */
+.log .n { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.log .memo { font-weight: 600; font-size: 13px; color: #555; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.log .memo::before { content: "· "; color: var(--faint); }

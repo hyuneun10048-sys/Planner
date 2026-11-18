@@ -240,6 +240,7 @@ function mergeAdjacentLogs() {
     const prev = out[out.length - 1];
     if (prev && prev.sectionId === l.sectionId && l.start - prev.end <= MERGE_GAP) {
       if (l.end > prev.end) prev.end = l.end;
+      if (l.memo && l.memo !== prev.memo) prev.memo = prev.memo ? `${prev.memo} · ${l.memo}`.slice(0, 60) : l.memo;
       touch(prev);
       tomb(l.id);
       merged = true;
@@ -1027,7 +1028,7 @@ function renderLogs(entries) {
     return `
       <li class="log ${e.live ? "" : "editable"}" style="--c:${sec.color}" data-id="${e.id}" ${e.live ? "" : 'title="눌러서 시간 수정"'}>
         <span class="bar"></span>
-        <span class="n">${emo(sec.emoji)} ${esc(sec.name)}</span>
+        <span class="n">${emo(sec.emoji)} ${esc(sec.name)}${e.memo ? `<span class="memo">${esc(e.memo)}</span>` : ""}</span>
         <span class="t">${hm(e.start)} – ${e.live ? "진행 중" : hm(e.end)}</span>
         <span class="d">${korDur(e.e - e.s)}</span>
         ${e.live ? "" : `<button class="del" aria-label="삭제">${emo("🗑️")}</button>`}
@@ -1120,12 +1121,14 @@ function openLogSheet({ id = null, start, end }) {
   $("#logDelete").classList.toggle("hidden", !log);
   // 기록이 속한 날(새벽 5시 기준)을 날짜 칸에: 수정해도 다른 날로 옮겨지지 않게
   $("#logDate").value = dateKey(new Date(start - DAY_START_HOUR * HOUR));
+  $("#logMemo").value = log && log.memo ? log.memo : "";
   $("#logStart").value = toHHMM(start);
   $("#logEnd").value = toHHMM(end);
   $("#logMsg").textContent = "";
   paintLogSecs();
   $("#logSheet").classList.remove("hidden");
   requestAnimationFrame(() => $("#logSheet").classList.add("show"));
+  if (log) setTimeout(() => $("#logMemo").focus(), 150); // 기록을 눌렀으면 바로 메모 입력
 }
 function closeLogSheet() {
   $("#logSheet").classList.remove("show");
@@ -1153,9 +1156,11 @@ $("#logForm").addEventListener("submit", (e) => {
   let end = fromHHMM(ev, day);
   if (end <= start) { $("#logMsg").textContent = "끝나는 시간이 시작보다 늦어야 해요 (하루는 새벽 5시에 시작해요)"; return; }
   if (end > Date.now() + 60000) { $("#logMsg").textContent = "아직 오지 않은 시간은 기록할 수 없어요"; return; }
+  const memo = $("#logMemo").value.trim().slice(0, 60);
   let log = logEditId && state.logs.find((l) => l.id === logEditId);
-  if (log) touch(Object.assign(log, { sectionId: logSec, start, end }));
-  else { log = { id: uid(), sectionId: logSec, start, end, u: Date.now() }; state.logs.push(log); }
+  if (log) touch(Object.assign(log, { sectionId: logSec, start, end, memo }));
+  else { log = { id: uid(), sectionId: logSec, start, end, memo, u: Date.now() }; state.logs.push(log); }
+  if (!log.memo) delete log.memo;
   const trimmed = trimOverlaps(log);
   state.logs.sort((a, b) => a.start - b.start);
   save();
