@@ -731,6 +731,17 @@ const calendarOn = () => syncOn() && sync.calendar !== false;
 const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch {} };
 
 async function api(action, extra = {}, method = "GET", cfg = sync) {
+  try {
+    return await apiRaw(action, extra, method, cfg);
+  } catch (e) {
+    // 브라우저가 응답을 못 읽은 경우 (Safari: "Load failed", Chrome: "Failed to fetch")
+    if (e instanceof TypeError) {
+      throw new Error("스크립트에 접속하지 못했어요. 웹 앱 URL 끝에 ?action=ping&token=비밀번호 를 붙여 새 탭에서 열어 보세요. {\"ok\":true} 가 나와야 정상이에요");
+    }
+    throw e;
+  }
+}
+async function apiRaw(action, extra, method, cfg) {
   let r;
   if (method === "GET") {
     r = await fetch(`${cfg.url}?${new URLSearchParams({ action, token: cfg.token, ...extra })}`);
