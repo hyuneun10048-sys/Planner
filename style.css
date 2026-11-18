@@ -511,3 +511,50 @@ button { cursor: pointer; background: none; border: 0; padding: 0; border-radius
 
 .log.editable { cursor: pointer; }
 .log.editable:hover { background: var(--soft); }
+
+/* ---------- 🏃 기록 중: 제자리에서 달리기 ---------- */
+.runner {
+  position: relative; flex: none;
+  width: 40px; height: 30px;
+  overflow: hidden;
+}
+.runner .emo {
+  position: absolute; left: 8px; bottom: 3px;
+  width: 24px; height: 24px;
+  animation: run-bob .32s ease-in-out infinite alternate;
+  transform-origin: 50% 100%;
+}
+/* 바닥 점선이 오른쪽으로 흘러가서 왼쪽으로 달리는 것처럼 보임 */
+.runner::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 1px; height: 2px;
+  background: repeating-linear-gradient(90deg, var(--c) 0 6px, transparent 6px 11px);
+  background-size: 11px 2px;
+  animation: run-ground .35s linear infinite;
+}
+@keyframes run-bob {
+  from { transform: translateY(0) rotate(-4deg); }
+  to   { transform: translateY(-4px) rotate(3deg); }
+}
+@keyframes run-ground { to { background-position: 11px 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .runner .emo, .runner::after { animation: none; }
+}
+
+/* ---------- 🔄 새로고침 ---------- */
+#refreshBtn .emo { transition: transform .4s; }
+#refreshBtn.spin .emo { animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tt-hint:empty { visibility: hidden; }
+
+/* 상단 버튼 4개가 한 줄에 들어가게 */
+.top-actions { flex-wrap: nowrap; }
+@media (max-width: 520px) {
+  .topbar { align-items: center; }
+  .brand { font-size: 24px; }
+  .top-actions { gap: 4px; }
+  .box-btn { height: 34px; padding: 0 8px; }
+}
+@media (max-width: 350px) {
+  .brand { font-size: 20px; }
+  .box-btn { padding: 0 6px; font-size: 13px; }
+}

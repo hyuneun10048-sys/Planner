@@ -22,6 +22,7 @@
     <header class="topbar">
       <div class="brand" id="brand"></div>
       <div class="top-actions">
+        <button class="box-btn" id="refreshBtn" title="새로고침" aria-label="새로고침"></button>
         <button class="box-btn" id="todayBtn">오늘</button>
         <button class="box-btn sync-btn" id="syncBtn" data-status="off" title="동기화 설정"></button>
         <button class="box-btn" id="calToggle" title="달력 접기/펼치기"></button>
@@ -67,7 +68,7 @@
         <!-- 오른쪽: 10분 단위 타임테이블 -->
         <div class="grid-col">
           <div class="tt-bar">
-            <span class="tt-hint" id="ttHint">칸 눌러 기록</span>
+            <span class="tt-hint" id="ttHint"></span>
             <button class="tt-add" id="addLogBtn">＋ 기록</button>
           </div>
           <div class="timetable" id="timetable"></div>

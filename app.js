@@ -271,6 +271,7 @@ function stopTimer(end = Date.now()) {
 function renderTop() {
   $("#brand").innerHTML = `<span class="logo-b">MY</span><span class="logo-l">PLANNER</span>`;
   $("#winterBtn").innerHTML = `${emo("❄️")} 겨울 색`;
+  $("#refreshBtn").innerHTML = emo("🔄");
   $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${ui.calOpen ? "달력 접기" : "달력"}</span>`;
   $("#calCard").classList.toggle("hidden", !ui.calOpen);
 }
@@ -322,6 +323,13 @@ $("#prevMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() - 1); 
 $("#nextMonth").onclick = () => { viewMonth.setMonth(viewMonth.getMonth() + 1); renderCalendar(); };
 $("#calToggle").onclick = () => { ui.calOpen = !ui.calOpen; saveUi(); renderTop(); renderCalendar(); };
 $("#todayBtn").onclick = () => goTo(todayKey());
+$("#refreshBtn").onclick = () => {
+  $("#refreshBtn").classList.add("spin");
+  // 저장 대기 중인 변경이 있으면 먼저 올리고 새로고침
+  const go = () => location.reload();
+  if (typeof pendingPush !== "undefined" && pendingPush && typeof push === "function") push().finally(go);
+  else setTimeout(go, 250);
+};
 
 function goTo(k) {
   current = k;
@@ -377,7 +385,7 @@ function renderNowBar() {
   bar.style.setProperty("--c", sec.color);
   bar.style.setProperty("--cbg", soft(sec.color));
   bar.innerHTML = `
-    <span class="dot"></span>
+    <span class="runner" aria-label="기록 중">${emo("🏃")}</span>
     <span class="what">${emo(sec.emoji)} ${esc(sec.name)}<span class="since">${hm(r.start)}부터</span></span>
     <span class="clock" id="nowClock">${clock(Date.now() - r.start)}</span>
     <button class="stop" id="stopBtn">종료</button>`;
@@ -783,7 +791,7 @@ function fromHHMM(v) {
 }
 
 function setPickHint() {
-  $("#ttHint").textContent = pickStart === null ? "칸 눌러 기록" : "끝 칸 선택";
+  $("#ttHint").textContent = pickStart === null ? "" : "끝 칸 선택";
   $("#ttHint").classList.toggle("on", pickStart !== null);
 }
 
