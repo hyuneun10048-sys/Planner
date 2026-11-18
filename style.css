@@ -467,7 +467,7 @@ button { cursor: pointer; background: none; border: 0; padding: 0; border-radius
 .tt-ev {
   position: absolute;
   box-sizing: border-box;
-  background: var(--ink);
+  background: rgba(17, 17, 17, 0.45); /* 반투명 검정: 아래 기록 색이 비쳐 보임 */
   overflow: hidden;
 }
 .tt-ev span {
