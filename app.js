@@ -976,13 +976,24 @@ function drawTimedEvents() {
   if (!layer) return;
   const [ws, we] = dayWindow(current);
   const events = timedEventsBetween(ws, we);
-  if (!events.length) { layer.innerHTML = ""; return; }
+  const tagged = entriesFor(current).filter((e) => e.memo);
+  if (!events.length && !tagged.length) { layer.innerHTML = ""; return; }
   const cells = $("#timetable").querySelectorAll(".tt-c");
   if (cells.length < 144) return;
   const first = cells[0], last = cells[5];
   const left0 = first.offsetLeft;
   const width = last.offsetLeft + last.offsetWidth - left0;
   let html = "";
+  // 🏷 메모(태그)가 있는 기록: 구글 캘린더처럼 시작 위치에 라벨
+  for (const e of tagged) {
+    const h = Math.floor((e.s - ws) / HOUR);
+    if (h < 0 || h > 23) continue;
+    const rs = ws + h * HOUR;
+    const row = cells[h * 6];
+    const x = left0 + ((e.s - rs) / HOUR) * width;
+    const color = secById(e.sectionId).color;
+    html += `<div class="tt-tag ${isLight(color) ? "light" : ""}" style="--c:${color};left:${x}px;top:${row.offsetTop}px;max-width:${left0 + width - x}px" title="${esc(e.memo)}">${esc(e.memo)}</div>`;
+  }
   for (const ev of events) {
     const s = Math.max(ev.start, ws), e = Math.min(ev.end, we);
     let labelled = false;
@@ -999,6 +1010,14 @@ function drawTimedEvents() {
     }
   }
   layer.innerHTML = html;
+}
+
+/** 밝은 색이면 글자를 검정으로 */
+function isLight(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 170;
 }
 
 /** 캐시된 모든 달에서 [from, to) 와 겹치는 시간 지정 일정 (중복 제거) */
@@ -1155,7 +1174,6 @@ $("#logForm").addEventListener("submit", (e) => {
   const start = fromHHMM(sv, day);
   let end = fromHHMM(ev, day);
   if (end <= start) { $("#logMsg").textContent = "끝나는 시간이 시작보다 늦어야 해요 (하루는 새벽 5시에 시작해요)"; return; }
-  if (end > Date.now() + 60000) { $("#logMsg").textContent = "아직 오지 않은 시간은 기록할 수 없어요"; return; }
   const memo = $("#logMemo").value.trim().slice(0, 60);
   let log = logEditId && state.logs.find((l) => l.id === logEditId);
   if (log) touch(Object.assign(log, { sectionId: logSec, start, end, memo }));
