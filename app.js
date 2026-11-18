@@ -608,6 +608,7 @@ $("#sections").addEventListener("keydown", (e) => {
 /** 다른 섹션 기록과 겹치면, 방금 저장한 기록(keep)을 우선하고 겹친 부분을 잘라냄. 잘린 기록 수를 돌려줌 */
 function trimOverlaps(keep) {
   let n = 0;
+  const cut = new Set(); // 이번에 잘린 기록만 (원래 짧은 기록은 건드리지 않음)
   for (const o of state.logs.slice()) {
     if (o === keep || o.sectionId === keep.sectionId) continue; // 같은 섹션은 '붙은 기록 합치기'가 처리
     if (o.end <= keep.start || o.start >= keep.end) continue;
@@ -616,19 +617,23 @@ function trimOverlaps(keep) {
       state.logs = state.logs.filter((x) => x !== o);
       tomb(o.id);
     } else if (o.start < keep.start && o.end > keep.end) {     // 가운데가 겹침 → 둘로 나눔
-      state.logs.push({ id: uid(), sectionId: o.sectionId, start: keep.end, end: o.end, u: Date.now() });
+      const rest = { id: uid(), sectionId: o.sectionId, start: keep.end, end: o.end, u: Date.now() };
+      state.logs.push(rest);
       o.end = keep.start;
       touch(o);
+      cut.add(o); cut.add(rest);
     } else if (o.start < keep.start) {                          // 뒷부분이 겹침
       o.end = keep.start;
       touch(o);
+      cut.add(o);
     } else {                                                    // 앞부분이 겹침
       o.start = keep.end;
       touch(o);
+      cut.add(o);
     }
   }
-  // 너무 짧아진(1분 미만) 조각은 정리
-  for (const o of state.logs.slice()) {
+  // 잘리고 나서 너무 짧아진(1분 미만) 조각은 정리
+  for (const o of cut) {
     if (o.end - o.start < 60000) { state.logs = state.logs.filter((x) => x !== o); tomb(o.id); }
   }
   return n;
