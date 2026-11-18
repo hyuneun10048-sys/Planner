@@ -419,7 +419,7 @@ function renderSections(entries) {
   }
 
   wrap.innerHTML = state.sections.map((sec) => {
-    const items = list.filter((t) => t.sectionId === sec.id);
+    const items = sortTodos(list).filter((t) => t.sectionId === sec.id);
     const running = state.running?.sectionId === sec.id;
     return `
       <div class="section ${running ? "running" : ""}" data-sec="${sec.id}" style="--c:${sec.color}">
@@ -533,6 +533,109 @@ $("#sections").addEventListener("submit", (e) => {
 $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
+/* 할 일 순서: o(순서 값)가 있으면 그 순서, 없으면 추가한 순서 */
+function sortTodos(list) {
+  return list
+    .map((t, i) => [t, t.o ?? i * 1000])
+    .sort((a, b) => a[1] - b[1])
+    .map(([t]) => t);
+}
+
+/* ===========================================================
+   할 일 꾹 눌러서 옮기기 (섹션 사이 이동 / 순서 바꾸기)
+   =========================================================== */
+const drag = { timer: null, id: null, x0: 0, y0: 0, ghost: null, active: false, target: null, before: null, suppressClick: false };
+
+$("#sections").addEventListener("pointerdown", (e) => {
+  const li = e.target.closest(".todo");
+  if (!li || e.button > 0 || e.target.closest(".check, .del")) return;
+  if (editing && e.target.closest(".todo-text")) return; // 편집 모드에선 눌러서 수정
+  drag.id = li.dataset.id;
+  drag.x0 = e.clientX; drag.y0 = e.clientY;
+  clearTimeout(drag.timer);
+  drag.timer = setTimeout(() => startDrag(li, e.clientX, e.clientY), 400);
+});
+
+function startDrag(li, x, y) {
+  drag.active = true;
+  const r = li.getBoundingClientRect();
+  const g = li.cloneNode(true);
+  g.classList.add("drag-ghost");
+  g.style.width = `${r.width}px`;
+  g.style.setProperty("--c", getComputedStyle(li).getPropertyValue("--c"));
+  drag.dx = x - r.left; drag.dy = y - r.top;
+  document.body.appendChild(g);
+  drag.ghost = g;
+  li.classList.add("drag-src");
+  document.body.classList.add("dragging");
+  if (navigator.vibrate) navigator.vibrate(15);
+  moveDrag(x, y);
+}
+
+function moveDrag(x, y) {
+  const g = drag.ghost;
+  g.style.transform = `translate(${x - drag.dx}px, ${y - drag.dy}px) rotate(-1.5deg)`;
+  // 손가락 아래 섹션 / 들어갈 자리 찾기
+  document.querySelectorAll(".section.drop-target").forEach((el) => el.classList.remove("drop-target"));
+  document.querySelectorAll(".drop-line").forEach((el) => el.remove());
+  const el = document.elementFromPoint(x, y);
+  const sec = el && el.closest(".section");
+  drag.target = sec ? sec.dataset.sec : null;
+  drag.before = null;
+  if (!sec) return;
+  sec.classList.add("drop-target");
+  const ul = sec.querySelector(".todo-list");
+  const rows = [...ul.querySelectorAll(".todo:not(.drag-src)")];
+  const next = rows.find((row) => { const b = row.getBoundingClientRect(); return y < b.top + b.height / 2; });
+  drag.before = next ? next.dataset.id : null;
+  const line = document.createElement("li");
+  line.className = "drop-line";
+  ul.insertBefore(line, next || null);
+  // 화면 끝에 가까우면 자동 스크롤
+  if (y < 70) window.scrollBy(0, -12);
+  else if (y > window.innerHeight - 70) window.scrollBy(0, 12);
+}
+
+function endDrag(cancel) {
+  clearTimeout(drag.timer);
+  if (!drag.active) { drag.id = null; return; }
+  drag.active = false;
+  drag.suppressClick = true;
+  setTimeout(() => { drag.suppressClick = false; }, 300);
+  drag.ghost?.remove();
+  drag.ghost = null;
+  document.body.classList.remove("dragging");
+  document.querySelectorAll(".drag-src").forEach((el) => el.classList.remove("drag-src"));
+  document.querySelectorAll(".section.drop-target").forEach((el) => el.classList.remove("drop-target"));
+  document.querySelectorAll(".drop-line").forEach((el) => el.remove());
+  const list = todosOf(current);
+  const t = list.find((x) => x.id === drag.id);
+  const target = drag.target;
+  drag.id = null;
+  if (cancel || !t || !target) return;
+  // 옮긴 섹션 안의 순서를 다시 매김
+  const ordered = sortTodos(list).filter((x) => x.sectionId === target && x.id !== t.id);
+  const at = drag.before ? ordered.findIndex((x) => x.id === drag.before) : ordered.length;
+  ordered.splice(at < 0 ? ordered.length : at, 0, t);
+  t.sectionId = target;
+  ordered.forEach((x, i) => { x.o = (i + 1) * 1000; touch(x); });
+  save();
+  renderCalendar();
+  renderDay();
+}
+
+document.addEventListener("pointermove", (e) => {
+  if (drag.active) { moveDrag(e.clientX, e.clientY); return; }
+  if (drag.id && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 8) { clearTimeout(drag.timer); drag.id = null; } // 스크롤로 판단
+});
+document.addEventListener("pointerup", () => endDrag(false));
+document.addEventListener("pointercancel", () => endDrag(!drag.active));
+// 끄는 동안 화면이 스크롤되지 않게 (iOS)
+document.addEventListener("touchmove", (e) => { if (drag.active) e.preventDefault(); }, { passive: false });
+// 끌고 난 직후 클릭(완료 체크 등)은 무시
+document.addEventListener("click", (e) => { if (drag.suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+document.addEventListener("contextmenu", (e) => { if (e.target.closest(".todo")) e.preventDefault(); });
+
 /* 입력창 밖을 누르면 닫기 (＋를 눌렀을 때만 보이게) */
 let lastAddClose = { id: null, t: 0 };
 $("#sections").addEventListener("focusout", (e) => {

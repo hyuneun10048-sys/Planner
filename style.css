@@ -584,3 +584,25 @@ button { cursor: pointer; background: none; border: 0; padding: 0; border-radius
   .tt-hint .idler .emo { animation: none; }
   .tt-hint .dots::after { animation: none; content: ".."; }
 }
+
+/* ---------- 할 일 꾹 눌러 옮기기 ---------- */
+.todo { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.drag-ghost {
+  position: fixed; left: 0; top: 0; z-index: 200;
+  margin: 0; list-style: none;
+  background: #fff;
+  border: var(--bw) solid var(--ink) !important;
+  box-shadow: 6px 6px 0 var(--ink);
+  padding: 8px 10px;
+  pointer-events: none;
+}
+.drag-ghost .del { display: none !important; }
+.todo.drag-src { opacity: .25; }
+body.dragging { cursor: grabbing; }
+body.dragging * { cursor: grabbing !important; }
+.section.drop-target .sec-head { background: var(--soft); }
+.section.drop-target .todo-list { min-height: 30px; }
+.drop-line {
+  list-style: none; height: 3px; margin: 2px 0;
+  background: var(--c, var(--ink));
+}
