@@ -379,6 +379,7 @@ function renderNowBar() {
   const bar = $("#nowBar");
   const r = state.running;
   renderFab();
+  setPickHint();
   if (!r) { bar.classList.add("hidden"); return; }
   const sec = secById(r.sectionId);
   bar.classList.remove("hidden");
@@ -790,9 +791,17 @@ function fromHHMM(v) {
   return ts;
 }
 
+/** 타임테이블 위 상태: 칸 고르는 중 / 🏃 기록중.. / 🧍 기록 대기.. */
 function setPickHint() {
-  $("#ttHint").textContent = pickStart === null ? "" : "끝 칸 선택";
-  $("#ttHint").classList.toggle("on", pickStart !== null);
+  const el = $("#ttHint");
+  if (!el) return;
+  el.classList.toggle("on", pickStart !== null);
+  const r = state.running;
+  el.classList.toggle("is-running", !!r && pickStart === null);
+  if (r) el.style.setProperty("--c", secById(r.sectionId).color);
+  if (pickStart !== null) el.innerHTML = "끝 칸 선택";
+  else if (r) el.innerHTML = `<span class="runner">${emo("🏃")}</span><span class="st-text">기록중<i class="dots"></i></span>`;
+  else el.innerHTML = `<span class="idler">${emo("🧍")}</span><span class="st-text">기록 대기<i class="dots"></i></span>`;
 }
 
 $("#timetable").addEventListener("click", (e) => {
