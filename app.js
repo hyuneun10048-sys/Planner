@@ -300,7 +300,11 @@ function stopTimer(end = Date.now()) {
   if (!r) return;
   state.running = null;
   state.runningU = Date.now();
-  if (end - r.start >= 1000) state.logs.push({ id: uid(), sectionId: r.sectionId, start: r.start, end, u: Date.now() });
+  if (end - r.start >= 1000) {
+    const log = { id: uid(), sectionId: r.sectionId, start: r.start, end, u: Date.now() };
+    state.logs.push(log);
+    trimOverlaps(log); // 타이머 도중 사후기록한 다른 섹션과 겹치면 정리
+  }
 }
 
 /* ===========================================================
@@ -601,6 +605,35 @@ $("#sections").addEventListener("submit", (e) => {
 $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
+/** 다른 섹션 기록과 겹치면, 방금 저장한 기록(keep)을 우선하고 겹친 부분을 잘라냄. 잘린 기록 수를 돌려줌 */
+function trimOverlaps(keep) {
+  let n = 0;
+  for (const o of state.logs.slice()) {
+    if (o === keep || o.sectionId === keep.sectionId) continue; // 같은 섹션은 '붙은 기록 합치기'가 처리
+    if (o.end <= keep.start || o.start >= keep.end) continue;
+    n++;
+    if (o.start >= keep.start && o.end <= keep.end) {          // 완전히 덮임 → 삭제
+      state.logs = state.logs.filter((x) => x !== o);
+      tomb(o.id);
+    } else if (o.start < keep.start && o.end > keep.end) {     // 가운데가 겹침 → 둘로 나눔
+      state.logs.push({ id: uid(), sectionId: o.sectionId, start: keep.end, end: o.end, u: Date.now() });
+      o.end = keep.start;
+      touch(o);
+    } else if (o.start < keep.start) {                          // 뒷부분이 겹침
+      o.end = keep.start;
+      touch(o);
+    } else {                                                    // 앞부분이 겹침
+      o.start = keep.end;
+      touch(o);
+    }
+  }
+  // 너무 짧아진(1분 미만) 조각은 정리
+  for (const o of state.logs.slice()) {
+    if (o.end - o.start < 60000) { state.logs = state.logs.filter((x) => x !== o); tomb(o.id); }
+  }
+  return n;
+}
+
 const kcalPending = new Set(); // (자동 계산 없음 — 화면 표시용으로만 남김)
 
 /* 할 일 순서: o(순서 값)가 있으면 그 순서, 없으면 추가한 순서 */
@@ -1018,9 +1051,9 @@ let logSec = null;      // 고른 섹션
 
 const toHHMM = (ts) => hm(ts);
 /** "HH:MM" → 선택한 날의 시각 (새벽 5시 전이면 다음날 새벽) */
-function fromHHMM(v) {
+function fromHHMM(v, dayKey = current) {
   const [h, m] = v.split(":").map(Number);
-  let ts = fromKey(current).getTime() + h * HOUR + m * 60000;
+  let ts = fromKey(dayKey).getTime() + h * HOUR + m * 60000;
   if (h < DAY_START_HOUR) ts += 24 * HOUR;
   return ts;
 }
@@ -1080,6 +1113,8 @@ function openLogSheet({ id = null, start, end }) {
   }
   $("#logTitle").textContent = log ? "기록 수정" : "시간 기록 추가";
   $("#logDelete").classList.toggle("hidden", !log);
+  // 기록이 속한 날(새벽 5시 기준)을 날짜 칸에: 수정해도 다른 날로 옮겨지지 않게
+  $("#logDate").value = dateKey(new Date(start - DAY_START_HOUR * HOUR));
   $("#logStart").value = toHHMM(start);
   $("#logEnd").value = toHHMM(end);
   $("#logMsg").textContent = "";
@@ -1108,17 +1143,20 @@ $("#logForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const sv = $("#logStart").value, ev = $("#logEnd").value;
   if (!sv || !ev) return;
-  const start = fromHHMM(sv);
-  let end = fromHHMM(ev);
+  const day = $("#logDate").value || current;
+  const start = fromHHMM(sv, day);
+  let end = fromHHMM(ev, day);
   if (end <= start) { $("#logMsg").textContent = "끝나는 시간이 시작보다 늦어야 해요 (하루는 새벽 5시에 시작해요)"; return; }
   if (end > Date.now() + 60000) { $("#logMsg").textContent = "아직 오지 않은 시간은 기록할 수 없어요"; return; }
-  const log = logEditId && state.logs.find((l) => l.id === logEditId);
+  let log = logEditId && state.logs.find((l) => l.id === logEditId);
   if (log) touch(Object.assign(log, { sectionId: logSec, start, end }));
-  else state.logs.push({ id: uid(), sectionId: logSec, start, end, u: Date.now() });
+  else { log = { id: uid(), sectionId: logSec, start, end, u: Date.now() }; state.logs.push(log); }
+  const trimmed = trimOverlaps(log);
   state.logs.sort((a, b) => a.start - b.start);
   save();
   closeLogSheet();
-  renderDay();
+  if (day !== current) goTo(day); else renderDay();
+  if (trimmed) setTimeout(() => alert(`겹치는 기록 ${trimmed}개를 방금 저장한 시간에 맞춰 잘랐어요.`), 250);
 });
 $("#logDelete").onclick = () => {
   if (!logEditId || !confirm("이 기록을 삭제할까요?")) return;
