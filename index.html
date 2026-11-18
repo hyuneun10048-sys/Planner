@@ -110,6 +110,39 @@
     </form>
   </div>
 
+  <!-- 구글 캘린더 일정 추가 / 수정 -->
+  <div class="sheet-backdrop hidden" id="evSheet">
+    <form class="sheet" id="evForm" autocomplete="off">
+      <div class="sheet-grip"></div>
+      <h3 class="sheet-title" id="evTitleH">일정 추가</h3>
+
+      <label class="field-label" for="evName">제목</label>
+      <input id="evName" class="field" placeholder="예: 투자론 스터디" maxlength="100" />
+
+      <label class="field-label" for="evCal">캘린더</label>
+      <select id="evCal" class="field"></select>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="evAllDay" />
+        <span>종일</span>
+      </label>
+
+      <div class="time-row" id="evTimes" style="margin-top:12px">
+        <input type="time" id="evStart" class="field" step="60" />
+        <span>~</span>
+        <input type="time" id="evEnd" class="field" step="60" />
+      </div>
+      <p class="sync-state" id="evMsg"></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="sheet-del hidden" id="evDelete">일정 삭제</button>
+        <span class="spacer"></span>
+        <button type="button" class="sheet-cancel" id="evCancel">취소</button>
+        <button type="submit" class="sheet-save" id="evSave">저장</button>
+      </div>
+    </form>
+  </div>
+
   <button class="fab" id="fab" aria-label="오늘로 이동"></button>
 
   <!-- 섹션 설정 시트 -->
@@ -128,6 +161,12 @@
 
       <div class="field-label">색상</div>
       <div class="swatches" id="sheetColors"></div>
+
+      <div class="sheet-cal hidden" id="sheetCalWrap">
+        <label class="field-label" for="sheetCal">구글 캘린더 (이 섹션의 시간 기록을 넣을 곳)</label>
+        <select id="sheetCal" class="field"></select>
+        <p class="sync-state" id="sheetCalMsg"></p>
+      </div>
 
       <div class="sheet-actions">
         <button type="button" class="sheet-del hidden" id="sheetDelete">섹션 삭제</button>
@@ -154,6 +193,10 @@
       <label class="toggle-row">
         <input type="checkbox" id="syncCal" checked />
         <span>구글 캘린더 일정 보기</span>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="syncLogsCal" checked />
+        <span>시간 기록을 구글 캘린더에도 저장 (섹션마다 고른 캘린더)</span>
       </label>
 
       <p class="sync-state" id="syncState"></p>

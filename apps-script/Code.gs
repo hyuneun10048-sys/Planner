@@ -8,10 +8,13 @@
  * 3) 나온 웹 앱 URL(…/exec)과 TOKEN 을 플래너의 ☁️ 설정에 입력하세요.
  *
  * 플래너 데이터는 내 구글 드라이브의 'my-planner-data.json' 파일에 저장돼요.
+ * 시간 기록은 섹션마다 고른 구글 캘린더에 일정으로도 저장돼요.
  */
 
 const TOKEN = '여기에-나만-아는-비밀번호';
 const FILE_NAME = 'my-planner-data.json';
+const MAP_FILE = 'my-planner-calendar-map.json'; // 기록 id ↔ 캘린더 일정 id
+const LOG_TAG = 'myPlannerLog';                   // 플래너가 만든 기록 일정 표시
 
 function doGet(e) {
   return handle_(e && e.parameter ? e.parameter : {});
@@ -32,11 +35,27 @@ function handle_(p) {
       case 'load':
         return json_({ ok: true, data: readData_() });
       case 'save':
-        return json_(saveData_(p.data, false));
-      case 'replace':
-        return json_(saveData_(p.data, true));
+      case 'replace': {
+        const r = saveData_(p.data, p.action === 'replace');
+        if (r.ok && p.logsToCalendar) {
+          try { r.calendar = syncLogs_(r.data); }
+          catch (err) { r.calendarError = String(err && err.message || err); }
+        }
+        return json_(r);
+      }
       case 'events':
         return json_({ ok: true, events: events_(Number(p.from), Number(p.to)) });
+      case 'calendars':
+        return json_({ ok: true, calendars: calendars_() });
+      case 'createCalendar':
+        return json_({ ok: true, calendar: createCalendar_(p.name) });
+      case 'addEvent':
+        return json_({ ok: true, event: saveEvent_(p, null) });
+      case 'updateEvent':
+        return json_({ ok: true, event: saveEvent_(p, findEvent_(p.calendarId, p.id)) });
+      case 'deleteEvent':
+        findEvent_(p.calendarId, p.id).deleteEvent();
+        return json_({ ok: true });
     }
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
@@ -131,7 +150,9 @@ function events_(from, to) {
   CalendarApp.getAllCalendars().forEach(function (cal) {
     if (cal.isHidden() || !cal.isSelected()) return; // 캘린더 앱에서 체크해 둔 캘린더만
     const color = cal.getColor();
+    const editable = cal.isOwnedByMe();
     cal.getEvents(start, end).forEach(function (ev) {
+      if (ev.getTag(LOG_TAG)) return; // 플래너 시간 기록은 일정으로 다시 읽지 않음
       const allDay = ev.isAllDayEvent();
       out.push({
         id: ev.getId(),
@@ -143,10 +164,156 @@ function events_(from, to) {
         endDate: allDay ? Utilities.formatDate(ev.getAllDayEndDate(), tz, 'yyyy-MM-dd') : null,
         color: color,
         calendar: cal.getName(),
+        calendarId: cal.getId(),
+        editable: editable,
+        recurring: ev.isRecurringEvent(),
       });
     });
   });
   return out;
+}
+
+/* ---------- 내가 쓸 수 있는 캘린더 목록 ---------- */
+function calendars_() {
+  const def = CalendarApp.getDefaultCalendar().getId();
+  return CalendarApp.getAllOwnedCalendars().map(function (cal) {
+    return { id: cal.getId(), name: cal.getName(), color: cal.getColor(), primary: cal.getId() === def };
+  });
+}
+
+/** 같은 이름의 캘린더가 없을 때만 새로 만듦 */
+function createCalendar_(name) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('캘린더 이름이 필요해요');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const found = CalendarApp.getOwnedCalendarsByName(name);
+    const cal = found.length ? found[0] : CalendarApp.createCalendar(name, { timeZone: Session.getScriptTimeZone() });
+    return { id: cal.getId(), name: cal.getName(), color: cal.getColor(), primary: false };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function calendarOrDefault_(id) {
+  const cal = id ? CalendarApp.getCalendarById(id) : null;
+  return cal || CalendarApp.getDefaultCalendar();
+}
+
+function findEvent_(calendarId, id) {
+  const ev = calendarOrDefault_(calendarId).getEventById(id);
+  if (!ev) throw new Error('일정을 찾을 수 없어요');
+  return ev;
+}
+
+/* ---------- 플래너에서 일정 추가 / 수정 ---------- */
+function saveEvent_(p, ev) {
+  const title = String(p.title || '').trim() || '(제목 없음)';
+  const tz = Session.getScriptTimeZone();
+  const allDay = p.allDay === true || p.allDay === 'true';
+  if (!ev) {
+    const cal = calendarOrDefault_(p.calendarId);
+    ev = allDay
+      ? cal.createAllDayEvent(title, Utilities.parseDate(p.date, tz, 'yyyy-MM-dd'))
+      : cal.createEvent(title, new Date(Number(p.start)), new Date(Number(p.end)));
+  } else {
+    ev.setTitle(title);
+    if (allDay) ev.setAllDayDate(Utilities.parseDate(p.date, tz, 'yyyy-MM-dd'));
+    else ev.setTime(new Date(Number(p.start)), new Date(Number(p.end)));
+  }
+  return { id: ev.getId() };
+}
+
+/* ---------- 시간 기록 → 구글 캘린더 일정 ---------- */
+function readMap_() {
+  const it = DriveApp.getFilesByName(MAP_FILE);
+  if (!it.hasNext()) return {};
+  try { return JSON.parse(it.next().getBlob().getDataAsString()) || {}; } catch (e) { return {}; }
+}
+function writeMap_(map) {
+  const it = DriveApp.getFilesByName(MAP_FILE);
+  const text = JSON.stringify(map);
+  if (it.hasNext()) it.next().setContent(text);
+  else DriveApp.createFile(MAP_FILE, text, 'application/json');
+}
+
+// 섹션 색과 가장 가까운 구글 캘린더 일정 색
+const EVENT_COLORS_ = {
+  PALE_BLUE: '#a4bdfc', PALE_GREEN: '#7ae7bf', MAUVE: '#dbadff', PALE_RED: '#ff887c',
+  YELLOW: '#fbd75b', ORANGE: '#ffb878', CYAN: '#46d6db', GRAY: '#e1e1e1',
+  BLUE: '#5484ed', GREEN: '#51b749', RED: '#dc2127',
+};
+function nearestEventColor_(hex) {
+  const rgb = function (h) { const n = parseInt(String(h).replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+  const c = rgb(hex || '#9aa5b1');
+  let best = 'GRAY', bestD = Infinity;
+  Object.keys(EVENT_COLORS_).forEach(function (k) {
+    const e = rgb(EVENT_COLORS_[k]);
+    const d = Math.pow(c[0] - e[0], 2) + Math.pow(c[1] - e[1], 2) + Math.pow(c[2] - e[2], 2);
+    if (d < bestD) { bestD = d; best = k; }
+  });
+  return CalendarApp.EventColor[best];
+}
+
+function getEventSafe_(calId, eventId) {
+  try { const cal = CalendarApp.getCalendarById(calId); return cal ? cal.getEventById(eventId) : null; }
+  catch (e) { return null; }
+}
+
+/** 시간 기록을 섹션마다 연결한 캘린더에 일정으로 맞춰 둠 (연결 안 한 섹션은 넣지 않음) */
+function syncLogs_(data) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const map = readMap_();
+    const secs = {}, cals = {};
+    (data.sections || []).forEach(function (s) { secs[s.id] = s; });
+    const calOf = function (id) {
+      if (!id) return null;
+      if (!(id in cals)) { try { cals[id] = CalendarApp.getCalendarById(id); } catch (e) { cals[id] = null; } }
+      return cals[id];
+    };
+    const cutoff = Date.now() - 60 * 86400000; // 최근 60일 기록만 새로 넣거나 고침
+    const keep = {};
+    let changed = 0;
+    (data.logs || []).forEach(function (l) {
+      const sec = secs[l.sectionId];
+      const cal = sec && calOf(sec.calId);
+      const m = map[l.id];
+      if (!cal) return; // 캘린더 연결 안 한 섹션 → 아래에서 기존 일정 정리
+      keep[l.id] = true;
+      const calId = cal.getId();
+      const title = ((sec.emoji || '') + ' ' + sec.name).trim();
+      const sig = [calId, l.start, l.end, title, sec.color].join('|');
+      if (m && m.sig === sig) return;
+      if (l.end < cutoff) { if (m) keep[l.id] = true; return; }
+      let ev = m ? getEventSafe_(m.calId, m.eventId) : null;
+      if (ev && m.calId !== calId) { ev.deleteEvent(); ev = null; } // 다른 캘린더로 바꾼 경우
+      if (ev) {
+        ev.setTitle(title);
+        ev.setTime(new Date(l.start), new Date(l.end));
+      } else {
+        ev = cal.createEvent(title, new Date(l.start), new Date(l.end), { description: 'My Planner 시간 기록' });
+        ev.setTag(LOG_TAG, String(l.id));
+      }
+      try { ev.setColor(nearestEventColor_(sec.color)); } catch (e) {}
+      map[l.id] = { eventId: ev.getId(), calId: calId, sig: sig };
+      changed++;
+    });
+    // 지운 기록 / 캘린더 연결을 끊은 섹션의 기록은 캘린더에서도 지움
+    Object.keys(map).forEach(function (id) {
+      if (keep[id]) return;
+      const ev = getEventSafe_(map[id].calId, map[id].eventId);
+      if (ev) ev.deleteEvent();
+      delete map[id];
+      changed++;
+    });
+    if (changed) writeMap_(map);
+    return { changed: changed };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function json_(obj) {

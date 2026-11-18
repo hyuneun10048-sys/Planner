@@ -217,6 +217,7 @@ function winterize() {
 }
 if (winterize()) save(false);
 
+
 /* 기기별 화면 설정 (동기화하지 않음) */
 const UI_KEY = "planner.ui";
 const ui = (() => { try { return { calOpen: true, ...JSON.parse(localStorage.getItem(UI_KEY)) }; } catch { return { calOpen: true }; } })();
@@ -669,12 +670,21 @@ function openSheet(secId = null) {
     $("#sheetName").value = "";
   }
   $("#sheetTitle").textContent = sec ? "섹션 설정" : "새 섹션";
+  paintSheetCal(sec ? sec.calId : "");
+  if (syncOn()) loadCalendars().then(() => paintSheetCal($("#sheetCal").value || (sec ? sec.calId : "")));
   $("#sheetDelete").classList.toggle("hidden", !sec);
   paintSheet();
   $("#sheet").classList.remove("hidden");
   requestAnimationFrame(() => $("#sheet").classList.add("show"));
   if (!sec) setTimeout(() => $("#sheetName").focus(), 150);
 }
+function paintSheetCal(selected) {
+  const wrap = $("#sheetCalWrap");
+  wrap.classList.toggle("hidden", !syncOn());
+  $("#sheetCal").innerHTML = calOptions(selected || "", { none: true });
+  $("#sheetCalMsg").textContent = calListError ? `캘린더 목록을 못 불러왔어요: ${calListError}` : (calList.length ? "" : "캘린더 목록 불러오는 중…");
+}
+
 function closeSheet() {
   $("#sheet").classList.remove("show");
   setTimeout(() => $("#sheet").classList.add("hidden"), 200);
@@ -729,9 +739,11 @@ $("#sheetForm").addEventListener("submit", (e) => {
   const name = $("#sheetName").value.trim();
   if (!name) { $("#sheetName").focus(); return; }
   const sec = sheetFor && state.sections.find((s) => s.id === sheetFor);
-  if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color }));
+  const calId = syncOn() ? ($("#sheetCal").value || null) : undefined;
+  const calPart = calId === undefined ? {} : { calId };
+  if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color }, calPart));
   else {
-    state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color, u: Date.now() });
+    state.sections.push({ id: uid(), name, emoji: draft.emoji, color: draft.color, ...calPart, u: Date.now() });
     state.orderU = Date.now();
   }
   save();
@@ -762,6 +774,7 @@ document.addEventListener("keydown", (e) => {
   if (!$("#sheet").classList.contains("hidden")) closeSheet();
   if (!$("#syncSheet").classList.contains("hidden")) closeSyncSheet();
   if (!$("#logSheet").classList.contains("hidden")) closeLogSheet();
+  if (!$("#evSheet").classList.contains("hidden")) closeEvSheet();
 });
 $("#showAddSection").onclick = () => openSheet();
 
@@ -1100,13 +1113,160 @@ function renderEvents() {
   const list = eventsOn(current);
   box.classList.remove("hidden");
   box.innerHTML = `
-    <div class="ev-head ${current === todayKey() ? "is-today" : ""}">${emo("📅")} <span>${current === todayKey() ? "오늘 일정" : "일정"}</span><span class="ev-count">${list.length || ""}</span></div>
+    <div class="ev-head ${current === todayKey() ? "is-today" : ""}">${emo("📅")} <span>${current === todayKey() ? "오늘 일정" : "일정"}</span><span class="ev-count">${list.length || ""}</span>
+      <button class="sec-add ev-add" id="evAdd" aria-label="일정 추가">＋</button></div>
     ${list.length ? `<ul class="ev-list">${list.map((e) => `
-      <li class="ev">
+      <li class="ev ${e.editable && !e.recurring ? "editable" : ""}" data-key="${esc(e.calendarId || "")}|${esc(e.id)}" ${e.recurring ? 'title="반복 일정은 구글 캘린더 앱에서 수정해 주세요"' : ""}>
         <span class="ev-time">${e.allDay ? "종일" : hm(e.start)}</span>
         <span class="ev-title">${esc(e.title || "(제목 없음)")}</span>
       </li>`).join("")}</ul>` : `<p class="ev-empty">일정이 없어요</p>`}`;
 }
+
+/* ===========================================================
+   내 구글 캘린더 목록 / 섹션 ↔ 캘린더 연결
+   =========================================================== */
+const CALS_KEY = "planner.cals";
+let calList = (() => { try { return JSON.parse(localStorage.getItem(CALS_KEY)) || []; } catch { return []; } })();
+let calListError = "";
+// 처음 연결할 때 섹션 이름 → 캘린더 이름 자동 연결
+const AUTO_CAL = { "공부": "study", "업무": "근무일정", "개인": "개인일정" };
+// 캘린더가 없으면 한 번 새로 만들어 연결할 섹션
+const AUTO_CREATE = ["운동", "이동"];
+
+async function loadCalendars() {
+  if (!syncOn()) return;
+  try {
+    const res = await api("calendars");
+    if (!res.ok) throw new Error(res.error === "unknown action" ? "앱스 스크립트를 새 버전으로 배포해 주세요" : res.error);
+    calList = res.calendars || [];
+    calListError = "";
+    try { localStorage.setItem(CALS_KEY, JSON.stringify(calList)); } catch {}
+    await autoAssignCalendars();
+  } catch (e) {
+    calListError = e.message;
+  }
+}
+
+async function autoAssignCalendars() {
+  let changed = false;
+  const byName = (n) => calList.find((c) => c.name.trim().toLowerCase() === String(n).trim().toLowerCase());
+  for (const sec of state.sections) {
+    if (sec.calId !== undefined) continue; // 직접 고른(또는 '안 넣기') 섹션은 그대로
+    let cal = byName(AUTO_CAL[sec.name] || sec.name);
+    if (!cal && AUTO_CREATE.includes(sec.name)) {
+      try {
+        const res = await api("createCalendar", { name: sec.name }, "POST");
+        if (res.ok && res.calendar) { cal = res.calendar; calList.push(cal); }
+      } catch {}
+    }
+    if (cal) { sec.calId = cal.id; touch(sec); changed = true; }
+  }
+  if (changed) {
+    try { localStorage.setItem(CALS_KEY, JSON.stringify(calList)); } catch {}
+    save();
+    renderDay();
+  }
+}
+
+function calOptions(selected, { none = false } = {}) {
+  const opts = none ? [`<option value="">캘린더에 안 넣기</option>`] : [];
+  for (const c of calList) {
+    opts.push(`<option value="${esc(c.id)}" ${c.id === selected ? "selected" : ""}>${esc(c.name)}${c.primary ? " (기본)" : ""}</option>`);
+  }
+  return opts.join("");
+}
+
+/* ===========================================================
+   플래너에서 구글 캘린더 일정 추가 / 수정 / 삭제
+   =========================================================== */
+let evEdit = null; // { id, calendarId } 수정 중인 일정
+
+$("#events").addEventListener("click", (e) => {
+  if (e.target.closest("#evAdd")) { openEvSheet(null); return; }
+  const li = e.target.closest(".ev.editable");
+  if (!li) return;
+  const [calendarId, id] = li.dataset.key.split("|");
+  const ev = eventsOn(current).find((x) => x.id === id && (x.calendarId || "") === calendarId);
+  if (ev) openEvSheet(ev);
+});
+
+function openEvSheet(ev) {
+  evEdit = ev ? { id: ev.id, calendarId: ev.calendarId } : null;
+  $("#evTitleH").textContent = ev ? "일정 수정" : "일정 추가";
+  $("#evDelete").classList.toggle("hidden", !ev);
+  $("#evName").value = ev ? ev.title || "" : "";
+  const primary = (calList.find((c) => c.primary) || {}).id;
+  $("#evCal").innerHTML = calList.length ? calOptions(ev ? ev.calendarId : primary) : `<option value="">기본 캘린더</option>`;
+  $("#evCal").disabled = !!ev; // 다른 캘린더로 옮기기는 구글 캘린더 앱에서
+  $("#evAllDay").checked = ev ? !!ev.allDay : false;
+  let start, end;
+  if (ev && !ev.allDay) { start = ev.start; end = ev.end; }
+  else {
+    const base = current === todayKey() ? Math.ceil(Date.now() / (30 * 60000)) * 30 * 60000 : fromHHMM("10:00");
+    start = base; end = base + HOUR;
+  }
+  $("#evStart").value = hm(start);
+  $("#evEnd").value = hm(end);
+  $("#evMsg").textContent = "";
+  toggleEvTimes();
+  $("#evSheet").classList.remove("hidden");
+  requestAnimationFrame(() => $("#evSheet").classList.add("show"));
+  if (!ev) setTimeout(() => $("#evName").focus(), 150);
+}
+function closeEvSheet() {
+  $("#evSheet").classList.remove("show");
+  setTimeout(() => $("#evSheet").classList.add("hidden"), 200);
+}
+function toggleEvTimes() { $("#evTimes").classList.toggle("hidden", $("#evAllDay").checked); }
+$("#evAllDay").addEventListener("change", toggleEvTimes);
+$("#evCancel").onclick = closeEvSheet;
+$("#evSheet").addEventListener("click", (e) => { if (e.target.id === "evSheet") closeEvSheet(); });
+
+async function afterEventChange() {
+  const d = fromKey(current);
+  delete evCache[monthKey(d)];
+  await loadMonthEvents(d, true);
+  renderEvents();
+  drawTimedEvents();
+}
+
+$("#evForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $("#evName").value.trim();
+  if (!title) { $("#evName").focus(); return; }
+  const allDay = $("#evAllDay").checked;
+  const body = { title, allDay, date: current, calendarId: $("#evCal").value };
+  if (!allDay) {
+    body.start = fromHHMM($("#evStart").value);
+    body.end = fromHHMM($("#evEnd").value);
+    if (!(body.end > body.start)) { $("#evMsg").textContent = "끝나는 시간이 시작보다 늦어야 해요"; return; }
+  }
+  if (evEdit) { body.id = evEdit.id; body.calendarId = evEdit.calendarId; }
+  $("#evMsg").textContent = "구글 캘린더에 저장 중…";
+  $("#evSave").disabled = true;
+  try {
+    const res = await api(evEdit ? "updateEvent" : "addEvent", body, "POST");
+    if (!res.ok) throw new Error(res.error === "unknown action" ? "앱스 스크립트를 새 버전으로 배포해 주세요" : res.error);
+    closeEvSheet();
+    await afterEventChange();
+  } catch (err) {
+    $("#evMsg").textContent = `저장 실패: ${err.message}`;
+  } finally {
+    $("#evSave").disabled = false;
+  }
+});
+$("#evDelete").onclick = async () => {
+  if (!evEdit || !confirm("구글 캘린더에서 이 일정을 삭제할까요?")) return;
+  $("#evMsg").textContent = "삭제 중…";
+  try {
+    const res = await api("deleteEvent", { id: evEdit.id, calendarId: evEdit.calendarId }, "POST");
+    if (!res.ok) throw new Error(res.error === "unknown action" ? "앱스 스크립트를 새 버전으로 배포해 주세요" : res.error);
+    closeEvSheet();
+    await afterEventChange();
+  } catch (err) {
+    $("#evMsg").textContent = `삭제 실패: ${err.message}`;
+  }
+};
 
 /* ===========================================================
    여러 기기 동기화 (Google Apps Script + 구글 드라이브)
@@ -1114,6 +1274,7 @@ function renderEvents() {
 const SYNC_KEY = "planner.sync";
 let sync = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch { return {}; } })();
 let pushTimer = null;
+let calSyncError = "";
 let pendingPush = false;
 
 const syncOn = () => !!(sync.url && sync.token);
@@ -1153,7 +1314,9 @@ function setStatus(st, msg = "") {
   b.dataset.status = syncOn() ? st : "off";
   b.title = { off: "동기화 설정", ok: "동기화됨", syncing: "저장 중…", error: `동기화 오류: ${msg}` }[b.dataset.status];
   const el = $("#syncState");
-  if (el) el.textContent = syncOn() ? { ok: "✓ 연결됨", syncing: "저장 중…", error: `오류: ${msg}` }[st] || "" : "연결 안 됨";
+  if (el) el.textContent = syncOn()
+    ? ({ ok: "✓ 연결됨", syncing: "저장 중…", error: `오류: ${msg}` }[st] || "") + (calSyncError && st === "ok" ? ` · 캘린더 기록 저장 실패: ${calSyncError}` : "")
+    : "연결 안 됨";
 }
 
 function schedulePush() {
@@ -1165,7 +1328,9 @@ function schedulePush() {
 }
 async function push() {
   try {
-    const res = await api("save", { data: state }, "POST");
+    const res = await api("save", { data: state, logsToCalendar: sync.logsCal !== false }, "POST");
+    calSyncError = res.calendarError || "";
+    if (calSyncError) console.warn("캘린더 기록 저장 실패:", calSyncError);
     if (!res.ok) throw new Error(res.error);
     pendingPush = false;
     if (res.data) applyMerged(res.data);
@@ -1214,6 +1379,7 @@ function openSyncSheet() {
   $("#syncUrl").value = sync.url || "";
   $("#syncToken").value = sync.token || "";
   $("#syncCal").checked = sync.calendar !== false;
+  $("#syncLogsCal").checked = sync.logsCal !== false;
   $("#syncDisconnect").classList.toggle("hidden", !syncOn());
   $("#syncLinkBtn").classList.toggle("hidden", !syncOn());
   setStatus(syncOn() ? "ok" : "off");
@@ -1264,6 +1430,7 @@ async function connect(cfg, { askConflict = true } = {}) {
   setStatus("ok");
   renderCalendar();
   renderDay();
+  loadCalendars();
 }
 
 $("#syncForm").addEventListener("submit", async (e) => {
@@ -1272,6 +1439,7 @@ $("#syncForm").addEventListener("submit", async (e) => {
     url: $("#syncUrl").value.trim(),
     token: $("#syncToken").value.trim(),
     calendar: $("#syncCal").checked,
+    logsCal: $("#syncLogsCal").checked,
   };
   if (!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[^/]+\/exec$/.test(cfg.url)) {
     $("#syncState").textContent = "웹 앱 URL 은 https://script.google.com/macros/s/…/exec 형식이에요";
@@ -1326,6 +1494,7 @@ async function initSync() {
   setStatus(syncOn() ? "ok" : "off");
   if (!syncOn()) return;
   pull();
+  loadCalendars();
   setInterval(() => { if (document.visibilityState === "visible") pull(); }, 20000);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;

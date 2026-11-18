@@ -614,3 +614,14 @@ body.dragging * { cursor: grabbing !important; }
   from { transform: translateY(0) rotate(2deg); }
   to   { transform: translateY(-3px) rotate(-3deg); }
 }
+
+/* ---------- 구글 캘린더 일정 추가 / 수정 ---------- */
+.ev-head { position: relative; }
+.ev-add { margin-left: 8px; }
+.ev.editable { cursor: pointer; }
+.ev.editable:hover { background: var(--soft); }
+select.field { appearance: none; -webkit-appearance: none; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23111' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 14px center; padding-right: 36px; font-weight: 700; }
+select.field:disabled { color: var(--sub); background-color: var(--soft); }
+#evForm { --c: var(--ink); }
+#evTimes.hidden { display: none !important; }
+.sheet-cal { margin-top: 4px; }
