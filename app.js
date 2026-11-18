@@ -1075,11 +1075,17 @@ async function connect(cfg, { askConflict = true } = {}) {
   if (!ping.ok) throw new Error(ping.error === "unauthorized" ? "비밀번호가 맞지 않아요" : ping.error);
   const res = await api("load", {}, "GET", cfg);
   if (!res.ok) throw new Error(res.error);
+  const prev = sync;
   sync = cfg;
   saveSync();
   const remote = res.data;
   const localUsed = !!state.updatedAt;
-  if (remote && localUsed && askConflict) {
+  const sameAsBefore = prev.url === cfg.url && prev.token === cfg.token;
+  if (remote && sameAsBefore) {
+    // 이미 이 주소로 연결돼 있던 기기: 묻지 않고 항목별로 합치기
+    applyMerged(remote);
+    await push();
+  } else if (remote && localUsed && askConflict) {
     const useRemote = confirm(
       "구글 드라이브에 이미 저장된 플래너 데이터가 있어요.\n\n" +
       "[확인] 드라이브 데이터 불러오기 (이 기기 데이터는 덮어써져요)\n" +
