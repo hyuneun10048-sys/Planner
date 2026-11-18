@@ -282,6 +282,8 @@ $("#todayBtn").onclick = () => goTo(todayKey());
 
 function goTo(k) {
   current = k;
+  pickStart = null;
+  if (typeof setPickHint === "function") setPickHint();
   viewMonth = fromKey(k); viewMonth.setDate(1);
   openAdd = null;
   renderCalendar();
@@ -587,6 +589,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("#sheet").classList.contains("hidden")) closeSheet();
   if (!$("#syncSheet").classList.contains("hidden")) closeSyncSheet();
+  if (!$("#logSheet").classList.contains("hidden")) closeLogSheet();
 });
 $("#showAddSection").onclick = () => openSheet();
 
@@ -622,7 +625,9 @@ function renderTimetable(entries) {
         const w = Math.min(100 - startPct, (filled / SLOT) * 100);
         inner = `<i style="--c:${sec.color};left:${startPct}%;width:${Math.max(w, 6)}%"></i>`;
       }
-      html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""}" ${best ? `title="${esc(secById(best.sectionId).name)}"` : ""}>${inner}</div>`;
+      const idx = h * 6 + s;
+      const picked = pickStart !== null && idx === pickStart;
+      html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""} ${picked ? "pick" : ""}" data-i="${idx}" ${best ? `title="${esc(secById(best.sectionId).name)}"` : ""}>${inner}</div>`;
     }
   }
   $("#timetable").innerHTML = html + `<div class="tt-events" id="ttEvents"></div>`;
@@ -654,18 +659,10 @@ function drawTimedEvents() {
       const w = Math.max(4, ((b - a) / HOUR) * width);
       const label = labelled ? "" : `<span>${esc(ev.title || "(제목 없음)")}</span>`;
       labelled = true;
-      html += `<div class="tt-ev ${isLight(ev.color) ? "light" : ""}" style="--c:${ev.color || "#4a7cf0"};left:${x}px;top:${row.offsetTop}px;width:${w}px;height:${row.offsetHeight}px" title="${esc(ev.title || "")} ${hm(ev.start)}–${hm(ev.end)}">${label}</div>`;
+      html += `<div class="tt-ev" style="left:${x}px;top:${row.offsetTop}px;width:${w}px;height:${row.offsetHeight}px" title="${esc(ev.title || "")} ${hm(ev.start)}–${hm(ev.end)}">${label}</div>`;
     }
   }
   layer.innerHTML = html;
-}
-
-/** 밝은 색이면 글자를 검정으로 */
-function isLight(hex) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
-  if (!m) return false;
-  const n = parseInt(m[1], 16);
-  return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 170;
 }
 
 /** 캐시된 모든 달에서 [from, to) 와 겹치는 시간 지정 일정 (중복 제거) */
@@ -693,7 +690,7 @@ function renderLogs(entries) {
   $("#logList").innerHTML = entries.slice().reverse().map((e) => {
     const sec = secById(e.sectionId);
     return `
-      <li class="log" style="--c:${sec.color}" data-id="${e.id}">
+      <li class="log ${e.live ? "" : "editable"}" style="--c:${sec.color}" data-id="${e.id}" ${e.live ? "" : 'title="눌러서 시간 수정"'}>
         <span class="bar"></span>
         <span class="n">${emo(sec.emoji)} ${esc(sec.name)}</span>
         <span class="t">${hm(e.start)} – ${e.live ? "진행 중" : hm(e.end)}</span>
@@ -703,15 +700,131 @@ function renderLogs(entries) {
   }).join("");
 }
 $("#logList").addEventListener("click", (e) => {
+  const row = e.target.closest(".log.editable");
+  if (!row) return;
   const b = e.target.closest(".del");
-  if (!b) return;
-  const id = b.closest(".log").dataset.id;
+  if (!b) { openLogSheet({ id: row.dataset.id }); return; }
+  const id = row.dataset.id;
   if (!confirm("이 기록을 삭제할까요?")) return;
   state.logs = state.logs.filter((l) => l.id !== id);
   tomb(id);
   save();
   renderDay();
 });
+
+/* ===========================================================
+   지난 시간 기록 (사후 기록 / 수정)
+   =========================================================== */
+let pickStart = null;   // 타임테이블에서 고른 시작 칸 (0~143)
+let logEditId = null;   // 수정 중인 기록 id
+let logSec = null;      // 고른 섹션
+
+const toHHMM = (ts) => hm(ts);
+/** "HH:MM" → 선택한 날의 시각 (새벽 5시 전이면 다음날 새벽) */
+function fromHHMM(v) {
+  const [h, m] = v.split(":").map(Number);
+  let ts = fromKey(current).getTime() + h * HOUR + m * 60000;
+  if (h < DAY_START_HOUR) ts += 24 * HOUR;
+  return ts;
+}
+
+function setPickHint() {
+  $("#ttHint").textContent = pickStart === null ? "칸 눌러 기록" : "끝 칸 선택";
+  $("#ttHint").classList.toggle("on", pickStart !== null);
+}
+
+$("#timetable").addEventListener("click", (e) => {
+  const cell = e.target.closest(".tt-c");
+  if (!cell) return;
+  const i = Number(cell.dataset.i);
+  if (pickStart === null) {
+    pickStart = i;
+    cell.classList.add("pick");
+    setPickHint();
+    return;
+  }
+  const [ws] = dayWindow(current);
+  const a = Math.min(pickStart, i), b = Math.max(pickStart, i);
+  pickStart = null;
+  setPickHint();
+  renderTimetable(entriesFor(current));
+  openLogSheet({ start: ws + a * SLOT, end: ws + (b + 1) * SLOT });
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && pickStart !== null) { pickStart = null; setPickHint(); renderTimetable(entriesFor(current)); }
+});
+
+$("#addLogBtn").onclick = () => {
+  pickStart = null;
+  setPickHint();
+  // 오늘이면 최근 1시간, 다른 날이면 오전 9~10시
+  const [ws] = dayWindow(current);
+  let end = current === todayKey() ? Math.floor(Date.now() / SLOT) * SLOT : fromHHMM("10:00");
+  end = Math.max(end, ws + SLOT);
+  openLogSheet({ start: Math.max(ws, end - HOUR), end });
+};
+
+function openLogSheet({ id = null, start, end }) {
+  if (!state.sections.length) { alert("먼저 섹션을 만들어 주세요."); return; }
+  logEditId = id;
+  const log = id && state.logs.find((l) => l.id === id);
+  if (log) { start = log.start; end = log.end; logSec = log.sectionId; }
+  else if (!state.sections.some((s) => s.id === logSec)) {
+    logSec = (state.logs[state.logs.length - 1] || {}).sectionId;
+    if (!state.sections.some((s) => s.id === logSec)) logSec = state.sections[0].id;
+  }
+  $("#logTitle").textContent = log ? "기록 수정" : "시간 기록 추가";
+  $("#logDelete").classList.toggle("hidden", !log);
+  $("#logStart").value = toHHMM(start);
+  $("#logEnd").value = toHHMM(end);
+  $("#logMsg").textContent = "";
+  paintLogSecs();
+  $("#logSheet").classList.remove("hidden");
+  requestAnimationFrame(() => $("#logSheet").classList.add("show"));
+}
+function closeLogSheet() {
+  $("#logSheet").classList.remove("show");
+  setTimeout(() => $("#logSheet").classList.add("hidden"), 200);
+}
+function paintLogSecs() {
+  const sec = secById(logSec);
+  $("#logForm").style.setProperty("--c", sec.color);
+  $("#logSecs").innerHTML = state.sections.map((s) => `
+    <button type="button" class="sec-chip ${s.id === logSec ? "on" : ""}" data-id="${s.id}" style="--c:${s.color}">
+      ${emo(s.emoji)}<span>${esc(s.name)}</span>
+    </button>`).join("");
+}
+$("#logSecs").addEventListener("click", (e) => {
+  const b = e.target.closest(".sec-chip");
+  if (b) { logSec = b.dataset.id; paintLogSecs(); }
+});
+
+$("#logForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const sv = $("#logStart").value, ev = $("#logEnd").value;
+  if (!sv || !ev) return;
+  const start = fromHHMM(sv);
+  let end = fromHHMM(ev);
+  if (end <= start) { $("#logMsg").textContent = "끝나는 시간이 시작보다 늦어야 해요 (하루는 새벽 5시에 시작해요)"; return; }
+  if (end > Date.now() + 60000) { $("#logMsg").textContent = "아직 오지 않은 시간은 기록할 수 없어요"; return; }
+  const log = logEditId && state.logs.find((l) => l.id === logEditId);
+  if (log) touch(Object.assign(log, { sectionId: logSec, start, end }));
+  else state.logs.push({ id: uid(), sectionId: logSec, start, end, u: Date.now() });
+  state.logs.sort((a, b) => a.start - b.start);
+  save();
+  closeLogSheet();
+  renderDay();
+});
+$("#logDelete").onclick = () => {
+  if (!logEditId || !confirm("이 기록을 삭제할까요?")) return;
+  state.logs = state.logs.filter((l) => l.id !== logEditId);
+  tomb(logEditId);
+  save();
+  closeLogSheet();
+  renderDay();
+};
+$("#logCancel").onclick = closeLogSheet;
+$("#logSheet").addEventListener("click", (e) => { if (e.target.id === "logSheet") closeLogSheet(); });
 
 function renderDay() {
   const entries = entriesFor(current);
@@ -770,9 +883,9 @@ function renderEvents() {
   const list = eventsOn(current);
   box.classList.remove("hidden");
   box.innerHTML = `
-    <div class="ev-head">${emo("📅")} <span>오늘 일정</span><span class="ev-count">${list.length || ""}</span></div>
+    <div class="ev-head ${current === todayKey() ? "is-today" : ""}">${emo("📅")} <span>${current === todayKey() ? "오늘 일정" : "일정"}</span><span class="ev-count">${list.length || ""}</span></div>
     ${list.length ? `<ul class="ev-list">${list.map((e) => `
-      <li class="ev" style="--c:${e.color || "#4a7cf0"}">
+      <li class="ev">
         <span class="ev-time">${e.allDay ? "종일" : hm(e.start)}</span>
         <span class="ev-title">${esc(e.title || "(제목 없음)")}</span>
       </li>`).join("")}</ul>` : `<p class="ev-empty">일정이 없어요</p>`}`;

@@ -57,6 +57,10 @@
 
         <!-- 오른쪽: 10분 단위 타임테이블 -->
         <div class="grid-col">
+          <div class="tt-bar">
+            <span class="tt-hint" id="ttHint">칸 눌러 기록</span>
+            <button class="tt-add" id="addLogBtn">＋ 기록</button>
+          </div>
           <div class="timetable" id="timetable"></div>
         </div>
       </div>
@@ -67,7 +71,33 @@
       </details>
     </section>
 
-    <p class="hint">섹션 이름을 누르면 시간 기록이 시작되고, 다시 누르면 멈춰요. · 편집 모드에서 섹션을 누르면 이름·아이콘·색을 바꿀 수 있어요.</p>
+    <p class="hint">섹션 이름을 누르면 시간 기록이 시작되고, 다시 누르면 멈춰요. · 편집 모드에서 섹션을 누르면 이름·아이콘·색을 바꿀 수 있어요. · 지난 시간은 타임테이블에서 시작 칸 → 끝 칸을 차례로 눌러 기록해요.</p>
+  </div>
+
+  <!-- 시간 기록 추가 / 수정 -->
+  <div class="sheet-backdrop hidden" id="logSheet">
+    <form class="sheet" id="logForm" autocomplete="off">
+      <div class="sheet-grip"></div>
+      <h3 class="sheet-title" id="logTitle">시간 기록 추가</h3>
+
+      <div class="field-label">섹션</div>
+      <div class="sec-chips" id="logSecs"></div>
+
+      <div class="field-label">시간</div>
+      <div class="time-row">
+        <input type="time" id="logStart" class="field" step="60" required />
+        <span>~</span>
+        <input type="time" id="logEnd" class="field" step="60" required />
+      </div>
+      <p class="sync-state" id="logMsg"></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="sheet-del hidden" id="logDelete">기록 삭제</button>
+        <span class="spacer"></span>
+        <button type="button" class="sheet-cancel" id="logCancel">취소</button>
+        <button type="submit" class="sheet-save">저장</button>
+      </div>
+    </form>
   </div>
 
   <button class="fab" id="fab" aria-label="오늘로 이동"></button>
