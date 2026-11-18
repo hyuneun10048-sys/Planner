@@ -496,7 +496,7 @@ function renderSections(entries) {
         </ul>
         ${openAdd === sec.id ? `
           <form class="add-todo" autocomplete="off">
-            <input name="text" placeholder="${kcalSec ? "음식 입력 후 Enter (예: 김치찌개 1인분)" : "할 일 입력 후 Enter"}" maxlength="120" />
+            <input name="text" placeholder="${kcalSec ? "음식 칼로리 입력 후 Enter (예: 샐러드 350)" : "할 일 입력 후 Enter"}" maxlength="120" />
           </form>` : ""}
       </div>`;
   }).join("");
@@ -550,23 +550,21 @@ $("#sections").addEventListener("click", (e) => {
       if (!editing) return;
       const t = list.find((x) => x.id === todoId);
       const kcalItem = t && isKcalSec(t.sectionId);
-      const text = t && prompt(kcalItem ? "음식 수정 (바꾸면 칼로리를 다시 계산해요)" : "할 일 수정", t.text);
+      const text = t && prompt(kcalItem ? "음식 수정" : "할 일 수정", t.text);
       if (!text || !text.trim() || text.trim() === t.text) return;
       t.text = text.trim().slice(0, 120);
       touch(t);
-      if (kcalItem) estimateKcal(t);
       break;
     }
     case "editkcal": {
       const t = list.find((x) => x.id === todoId);
       if (!t) return;
-      const v = prompt(`'${t.text}' 칼로리 (kcal)\n비워 두면 AI 가 다시 계산해요`, Number.isFinite(t.kcal) ? t.kcal : "");
+      const v = prompt(`'${t.text}' 칼로리 (kcal)`, Number.isFinite(t.kcal) ? t.kcal : "");
       if (v === null) return;
-      if (v.trim() === "") { estimateKcal(t); break; }
-      const n = Math.round(Number(v.replace(/[^\d.]/g, "")));
-      if (!Number.isFinite(n)) return;
+      const n = v.trim() === "" ? null : Math.round(Number(v.replace(/[^\d.]/g, "")));
+      if (n !== null && !Number.isFinite(n)) return;
       t.kcal = n;
-      t.note = "직접 입력";
+      delete t.note;
       touch(t);
       break;
     }
@@ -592,7 +590,6 @@ $("#sections").addEventListener("submit", (e) => {
     // "샐러드 350" 처럼 숫자를 직접 적으면 AI 없이 그 칼로리로
     const m = text.match(/^(.*?)[\s,]*(\d{1,5})\s*(kcal|칼로리|cal)?$/i);
     if (m && m[1].trim()) { item.text = m[1].trim(); item.kcal = Number(m[2]); }
-    else estimateKcal(item);
   }
   todosOf(current).push(item);
   justAdded = true;
@@ -604,39 +601,7 @@ $("#sections").addEventListener("submit", (e) => {
 $("#sections").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.closest(".add-todo")) { openAdd = null; renderDay(); }
 });
-/* 🍽️ AI 칼로리 추정 (/api/kcal → Vercel AI Gateway). 같은 음식은 기기에 기억해서 다시 묻지 않음 */
-const kcalPending = new Set();
-const KCAL_CACHE_KEY = "planner.kcalCache";
-const kcalCache = (() => { try { return JSON.parse(localStorage.getItem(KCAL_CACHE_KEY)) || {}; } catch { return {}; } })();
-const findTodo = (id) => { for (const k in state.todos) { const x = state.todos[k].find((y) => y.id === id); if (x) return x; } return null; };
-async function estimateKcal(t) {
-  const key = t.text.trim().toLowerCase();
-  if (kcalCache[key]) {
-    Object.assign(t, { kcal: kcalCache[key].kcal, note: kcalCache[key].note || "" });
-    touch(t);
-    return;
-  }
-  kcalPending.add(t.id);
-  try {
-    const r = await fetch("/api/kcal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ food: t.text }) });
-    const j = await r.json().catch(() => ({}));
-    if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    t = findTodo(t.id) || t; // 기다리는 동안 동기화로 바뀌었을 수 있음
-    t.kcal = j.kcal;
-    t.note = j.note ? `AI · ${j.note}` : "AI 추정";
-    kcalCache[key] = { kcal: j.kcal, note: t.note };
-    try { localStorage.setItem(KCAL_CACHE_KEY, JSON.stringify(kcalCache)); } catch {}
-  } catch (e) {
-    t = findTodo(t.id) || t;
-    t.note = "자동 계산 실패 · 눌러서 입력";
-    console.warn("칼로리 계산 실패:", e.message);
-  } finally {
-    kcalPending.delete(t.id);
-    touch(t);
-    save();
-    renderDay();
-  }
-}
+const kcalPending = new Set(); // (자동 계산 없음 — 화면 표시용으로만 남김)
 
 /* 할 일 순서: o(순서 값)가 있으면 그 순서, 없으면 추가한 순서 */
 function sortTodos(list) {
