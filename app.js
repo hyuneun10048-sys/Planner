@@ -625,8 +625,65 @@ function renderTimetable(entries) {
       html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""}" ${best ? `title="${esc(secById(best.sectionId).name)}"` : ""}>${inner}</div>`;
     }
   }
-  $("#timetable").innerHTML = html;
+  $("#timetable").innerHTML = html + `<div class="tt-events" id="ttEvents"></div>`;
+  drawTimedEvents();
 }
+
+/** 시간이 정해진 구글 캘린더 일정을 타임테이블 위에 겹쳐 그리기 (한 시간 줄마다 한 조각) */
+function drawTimedEvents() {
+  const layer = document.getElementById("ttEvents");
+  if (!layer) return;
+  const [ws, we] = dayWindow(current);
+  const events = timedEventsBetween(ws, we);
+  if (!events.length) { layer.innerHTML = ""; return; }
+  const cells = $("#timetable").querySelectorAll(".tt-c");
+  if (cells.length < 144) return;
+  const first = cells[0], last = cells[5];
+  const left0 = first.offsetLeft;
+  const width = last.offsetLeft + last.offsetWidth - left0;
+  let html = "";
+  for (const ev of events) {
+    const s = Math.max(ev.start, ws), e = Math.min(ev.end, we);
+    let labelled = false;
+    for (let h = 0; h < 24; h++) {
+      const rs = ws + h * HOUR, re = rs + HOUR;
+      const a = Math.max(s, rs), b = Math.min(e, re);
+      if (b <= a) continue;
+      const row = cells[h * 6];
+      const x = left0 + ((a - rs) / HOUR) * width;
+      const w = Math.max(4, ((b - a) / HOUR) * width);
+      const label = labelled ? "" : `<span>${esc(ev.title || "(제목 없음)")}</span>`;
+      labelled = true;
+      html += `<div class="tt-ev ${isLight(ev.color) ? "light" : ""}" style="--c:${ev.color || "#4a7cf0"};left:${x}px;top:${row.offsetTop}px;width:${w}px;height:${row.offsetHeight}px" title="${esc(ev.title || "")} ${hm(ev.start)}–${hm(ev.end)}">${label}</div>`;
+    }
+  }
+  layer.innerHTML = html;
+}
+
+/** 밝은 색이면 글자를 검정으로 */
+function isLight(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 170;
+}
+
+/** 캐시된 모든 달에서 [from, to) 와 겹치는 시간 지정 일정 (중복 제거) */
+function timedEventsBetween(from, to) {
+  const seen = new Set(), out = [];
+  for (const c of Object.values(evCache)) {
+    for (const e of c.list) {
+      if (e.allDay || !overlap(e.start, e.end, from, to)) continue;
+      const key = e.id + "@" + e.start;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(e);
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+let resizeTimer = null;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawTimedEvents, 150); });
 
 /* ===========================================================
    기록 목록
@@ -696,6 +753,7 @@ async function loadMonthEvents(d, force = false) {
     evCache[mk] = { t: Date.now(), list: res.events };
     renderCalendar();
     renderEvents();
+    drawTimedEvents();
   } catch (e) {
     console.warn("캘린더 불러오기 실패", e);
   } finally {
@@ -707,6 +765,8 @@ function renderEvents() {
   const box = $("#events");
   if (!calendarOn()) { box.classList.add("hidden"); return; }
   loadMonthEvents(fromKey(current));
+  const next = fromKey(current); next.setDate(next.getDate() + 1);
+  if (next.getDate() === 1) loadMonthEvents(next); // 타임테이블은 다음날 새벽까지 보여줌
   const list = eventsOn(current);
   box.classList.remove("hidden");
   box.innerHTML = `
