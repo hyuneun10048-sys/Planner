@@ -184,7 +184,10 @@ function load() {
 
 let state = load();
 function save(touch = true) {
-  if (touch) state.updatedAt = Date.now();
+  if (touch) {
+    state.updatedAt = Date.now();
+    if (typeof mergeAdjacentLogs === "function") mergeAdjacentLogs();
+  }
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
   if (touch && typeof schedulePush === "function") schedulePush();
 }
@@ -216,6 +219,30 @@ function winterize() {
   return changed;
 }
 if (winterize()) save(false);
+
+/* 같은 섹션 기록이 거의 붙어 있으면(3분 이하 간격·겹침) 하나로 합치기
+   → 구글 캘린더에도 쪼개진 일정 대신 하나의 일정으로 들어감 */
+const MERGE_GAP = 3 * 60000;
+function mergeAdjacentLogs() {
+  const logs = state.logs.slice().sort((a, b) => a.start - b.start);
+  const out = [];
+  let merged = false;
+  for (const l of logs) {
+    // 같은 섹션의 가장 최근 기록 (사이에 다른 섹션 기록이 끼어 있으면 합치지 않음)
+    const prev = out[out.length - 1];
+    if (prev && prev.sectionId === l.sectionId && l.start - prev.end <= MERGE_GAP) {
+      if (l.end > prev.end) prev.end = l.end;
+      touch(prev);
+      tomb(l.id);
+      merged = true;
+      continue;
+    }
+    out.push(l);
+  }
+  if (merged) state.logs = out;
+  return merged;
+}
+if (mergeAdjacentLogs()) save(false); // 동기화되면 서버에도 올라감
 
 
 /* 기기별 화면 설정 (동기화하지 않음) */

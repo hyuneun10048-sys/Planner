@@ -268,10 +268,12 @@ function syncLogs_(data) {
       const calId = cal.getId();
       const title = ((sec.emoji || '') + ' ' + sec.name).trim();
       const sig = [calId, l.start, l.end, title].join('|');
-      if (m && m.sig === sig) return;
+      // nc: 색을 따로 칠하지 않은(캘린더 색을 따르는) 일정이라는 표시
+      if (m && m.sig === sig && m.nc) return;
       if (l.end < cutoff) { if (m) keep[l.id] = true; return; }
       let ev = m ? getEventSafe_(m.calId, m.eventId) : null;
-      if (ev && m.calId !== calId) { ev.deleteEvent(); ev = null; } // 다른 캘린더로 바꾼 경우
+      // 다른 캘린더로 바꿨거나, 예전 버전이 색을 따로 칠해 둔 일정이면 지우고 새로 만듦
+      if (ev && (m.calId !== calId || !m.nc)) { ev.deleteEvent(); ev = null; }
       if (ev) {
         ev.setTitle(title);
         ev.setTime(new Date(l.start), new Date(l.end));
@@ -280,7 +282,7 @@ function syncLogs_(data) {
         ev.setTag(LOG_TAG, String(l.id));
       }
       // 일정 색은 따로 정하지 않음 → 캘린더 원래 색을 따라감
-      map[l.id] = { eventId: ev.getId(), calId: calId, sig: sig };
+      map[l.id] = { eventId: ev.getId(), calId: calId, sig: sig, nc: 1 };
       changed++;
     });
     // 지운 기록 / 캘린더 연결을 끊은 섹션의 기록은 캘린더에서도 지움
