@@ -783,7 +783,7 @@ function openSheet(secId = null) {
   }
   $("#sheetTitle").textContent = sec ? "섹션 설정" : "새 섹션";
   paintSheetCal(sec ? sec.calId : "");
-  if (syncOn()) loadCalendars().then(() => paintSheetCal($("#sheetCal").value || (sec ? sec.calId : "")));
+
   $("#sheetDelete").classList.toggle("hidden", !sec);
   paintSheet();
   $("#sheet").classList.remove("hidden");
@@ -793,7 +793,7 @@ function openSheet(secId = null) {
 function paintSheetCal(selected) {
   const wrap = $("#sheetCalWrap");
   $("#sheetKcal").checked = draft.kind === "kcal";
-  wrap.classList.toggle("hidden", !syncOn() || draft.kind === "kcal");
+  wrap.classList.add("hidden"); // 시간 기록을 캘린더에 넣지 않으므로 숨김
   $("#sheetCal").innerHTML = calOptions(selected || "", { none: true });
   $("#sheetCalMsg").textContent = calListError ? `캘린더 목록을 못 불러왔어요: ${calListError}` : (calList.length ? "" : "캘린더 목록 불러오는 중…");
 }
@@ -853,7 +853,7 @@ $("#sheetForm").addEventListener("submit", (e) => {
   if (!name) { $("#sheetName").focus(); return; }
   const sec = sheetFor && state.sections.find((s) => s.id === sheetFor);
   const kind = $("#sheetKcal").checked ? "kcal" : "";
-  const calId = kind === "kcal" ? null : syncOn() ? ($("#sheetCal").value || null) : undefined;
+  const calId = undefined; // 섹션의 캘린더 연결은 더 이상 바꾸지 않음
   const calPart = calId === undefined ? {} : { calId };
   if (sec) touch(Object.assign(sec, { name, emoji: draft.emoji, color: draft.color, kind }, calPart));
   else {
@@ -1264,7 +1264,7 @@ async function loadCalendars() {
     calList = res.calendars || [];
     calListError = "";
     try { localStorage.setItem(CALS_KEY, JSON.stringify(calList)); } catch {}
-    await autoAssignCalendars();
+    // (시간 기록을 캘린더에 넣지 않으므로 섹션 ↔ 캘린더 자동 연결은 하지 않음)
   } catch (e) {
     calListError = e.message;
   }
@@ -1451,7 +1451,8 @@ function schedulePush() {
 }
 async function push() {
   try {
-    const res = await api("save", { data: state, logsToCalendar: sync.logsCal !== false }, "POST");
+    // 시간 기록은 구글 캘린더로 보내지 않음 (일정 보기·추가·수정만 연동)
+    const res = await api("save", { data: state, logsToCalendar: false }, "POST");
     calSyncError = res.calendarError || "";
     if (calSyncError) console.warn("캘린더 기록 저장 실패:", calSyncError);
     if (!res.ok) throw new Error(res.error);
@@ -1502,7 +1503,7 @@ function openSyncSheet() {
   $("#syncUrl").value = sync.url || "";
   $("#syncToken").value = sync.token || "";
   $("#syncCal").checked = sync.calendar !== false;
-  $("#syncLogsCal").checked = sync.logsCal !== false;
+
   $("#syncDisconnect").classList.toggle("hidden", !syncOn());
   $("#syncLinkBtn").classList.toggle("hidden", !syncOn());
   setStatus(syncOn() ? "ok" : "off");
@@ -1562,7 +1563,7 @@ $("#syncForm").addEventListener("submit", async (e) => {
     url: $("#syncUrl").value.trim(),
     token: $("#syncToken").value.trim(),
     calendar: $("#syncCal").checked,
-    logsCal: $("#syncLogsCal").checked,
+
   };
   if (!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[^/]+\/exec$/.test(cfg.url)) {
     $("#syncState").textContent = "웹 앱 URL 은 https://script.google.com/macros/s/…/exec 형식이에요";
@@ -1666,5 +1667,5 @@ window.addEventListener("storage", (e) => {
 
 $("#sheetKcal").addEventListener("change", () => {
   draft.kind = $("#sheetKcal").checked ? "kcal" : "";
-  $("#sheetCalWrap").classList.toggle("hidden", !syncOn() || draft.kind === "kcal");
+  // (캘린더 선택칸은 사용하지 않음)
 });
