@@ -790,25 +790,26 @@ function renderTimetable(entries) {
     html += `<div class="tt-h ${first}">${label}</div>`;
     for (let s = 0; s < 6; s++) {
       const a = ws + (h * 6 + s) * SLOT, b = a + SLOT;
-      let best = null, bestMs = 0, filled = 0, live = false;
+      // 한 칸(10분) 안에 여러 섹션이 있으면 실제 시간 위치대로 나눠서 칠함
+      let inner = "", live = false;
+      const names = [];
       for (const e of entries) {
-        const o = overlap(e.s, e.e, a, b);
-        if (!o) continue;
-        filled += o;
-        if (o > bestMs) { bestMs = o; best = e; }
+        const x = Math.max(e.s, a), y = Math.min(e.e, b);
+        if (y <= x) continue;
         if (e.live) live = true;
+        const sec = secById(e.sectionId);
+        if (!names.includes(sec.name)) names.push(sec.name);
+        const left = ((x - a) / SLOT) * 100, width = ((y - x) / SLOT) * 100;
+        if (width < 0.5) continue; // 몇 초짜리 조각은 생략
+        // 칸 경계에서 시작/끝나면 테두리까지 덮어서 칸 사이 흰 줄이 굵게 보이지 않게
+        const atStart = left < 0.01, atEnd = left + width > 99.99;
+        inner += `<i class="${atStart ? "s" : ""} ${e.live ? "lv" : ""}" style="--c:${sec.color};left:${atStart ? "-1px" : left + "%"};width:calc(${width}% + ${atStart ? 1 : 0}px)${atEnd ? "" : ""}"></i>`;
       }
+      const best = names.length;
       const isNow = now >= a && now < b;
-      let inner = "";
-      if (best) {
-        const sec = secById(best.sectionId);
-        const startPct = Math.max(0, (Math.min(...entries.filter((e) => overlap(e.s, e.e, a, b)).map((e) => e.s)) - a) / SLOT * 100);
-        const w = Math.min(100 - startPct, (filled / SLOT) * 100);
-        inner = `<i style="--c:${sec.color};left:${startPct}%;width:${Math.max(w, 6)}%"></i>`;
-      }
       const idx = h * 6 + s;
       const picked = pickStart !== null && idx === pickStart;
-      html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""} ${picked ? "pick" : ""}" data-i="${idx}" ${best ? `title="${esc(secById(best.sectionId).name)}"` : ""}>${inner}</div>`;
+      html += `<div class="tt-c ${first} ${isNow ? "now" : ""} ${live && isNow ? "live" : ""} ${picked ? "pick" : ""}" data-i="${idx}" ${best ? `title="${esc(names.join(" · "))}"` : ""}>${inner}</div>`;
     }
   }
   $("#timetable").innerHTML = html + `<div class="tt-events" id="ttEvents"></div>`;
