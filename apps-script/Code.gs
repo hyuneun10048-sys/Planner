@@ -238,24 +238,6 @@ function writeMap_(map) {
   else DriveApp.createFile(MAP_FILE, text, 'application/json');
 }
 
-// 섹션 색과 가장 가까운 구글 캘린더 일정 색
-const EVENT_COLORS_ = {
-  PALE_BLUE: '#a4bdfc', PALE_GREEN: '#7ae7bf', MAUVE: '#dbadff', PALE_RED: '#ff887c',
-  YELLOW: '#fbd75b', ORANGE: '#ffb878', CYAN: '#46d6db', GRAY: '#e1e1e1',
-  BLUE: '#5484ed', GREEN: '#51b749', RED: '#dc2127',
-};
-function nearestEventColor_(hex) {
-  const rgb = function (h) { const n = parseInt(String(h).replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
-  const c = rgb(hex || '#9aa5b1');
-  let best = 'GRAY', bestD = Infinity;
-  Object.keys(EVENT_COLORS_).forEach(function (k) {
-    const e = rgb(EVENT_COLORS_[k]);
-    const d = Math.pow(c[0] - e[0], 2) + Math.pow(c[1] - e[1], 2) + Math.pow(c[2] - e[2], 2);
-    if (d < bestD) { bestD = d; best = k; }
-  });
-  return CalendarApp.EventColor[best];
-}
-
 function getEventSafe_(calId, eventId) {
   try { const cal = CalendarApp.getCalendarById(calId); return cal ? cal.getEventById(eventId) : null; }
   catch (e) { return null; }
@@ -285,7 +267,7 @@ function syncLogs_(data) {
       keep[l.id] = true;
       const calId = cal.getId();
       const title = ((sec.emoji || '') + ' ' + sec.name).trim();
-      const sig = [calId, l.start, l.end, title, sec.color].join('|');
+      const sig = [calId, l.start, l.end, title].join('|');
       if (m && m.sig === sig) return;
       if (l.end < cutoff) { if (m) keep[l.id] = true; return; }
       let ev = m ? getEventSafe_(m.calId, m.eventId) : null;
@@ -297,7 +279,7 @@ function syncLogs_(data) {
         ev = cal.createEvent(title, new Date(l.start), new Date(l.end), { description: 'My Planner 시간 기록' });
         ev.setTag(LOG_TAG, String(l.id));
       }
-      try { ev.setColor(nearestEventColor_(sec.color)); } catch (e) {}
+      // 일정 색은 따로 정하지 않음 → 캘린더 원래 색을 따라감
       map[l.id] = { eventId: ev.getId(), calId: calId, sig: sig };
       changed++;
     });
