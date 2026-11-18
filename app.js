@@ -10,13 +10,32 @@ const DAY_START_HOUR = 5; // 하루는 새벽 5시에 시작 (밤샘 공부도 �
 const HOUR = 3600000;
 const SLOT = 10 * 60000;   // 타임테이블 한 칸 = 10분
 
+/* ❄️ 겨울 팔레트 */
 const PALETTE = [
-  "#a24bd1", "#6b5cc4", "#4a7cf0", "#14a5b5", "#2fb36b", "#8bbf3f",
-  "#e3b021", "#f07d12", "#e85d3f", "#e8467c", "#d77fb4", "#8a5a3c",
-  "#c8a27a", "#7b8794", "#3d4451", "#191919",
+  "#1f3a5f", // 미드나잇 네이비
+  "#3b6ea5", // 서리 블루
+  "#6fa8dc", // 아이스 블루
+  "#a9c8e8", // 옅은 얼음
+  "#4f8a9a", // 빙하 청록
+  "#2f5d50", // 소나무
+  "#7a9e83", // 세이지 그린
+  "#9b2335", // 베리 레드
+  "#c94c4c", // 호랑가시 레드
+  "#d99a9a", // 서리 장미
+  "#7a5c4e", // 코코아
+  "#b08968", // 라떼
+  "#8e8aa8", // 라벤더 황혼
+  "#5e5873", // 겨울 밤
+  "#9aa5b1", // 눈 회색
+  "#3d4451", // 슬레이트
 ];
+/* 섹션에 겨울 색을 차례로 입힐 때 순서 (서로 잘 구분되게) */
+const WINTER_ORDER = ["#3b6ea5", "#9b2335", "#2f5d50", "#7a5c4e", "#6fa8dc", "#8e8aa8", "#c94c4c", "#4f8a9a", "#1f3a5f", "#b08968", "#7a9e83", "#5e5873", "#d99a9a", "#a9c8e8", "#9aa5b1", "#3d4451"];
 
 const EMOJI_CHOICES = [
+  "❄️", "⛄", "☃️", "🧣", "🧤", "🎄", "🎁", "🕯️",
+  "🎿", "⛸️", "🛷", "🌨️", "🍵", "🫖", "🍫", "🍠",
+  "🧦", "🐧",
   "📚", "📖", "📝", "✏️", "💻", "💼", "⚖️", "🚓",
   "🧮", "🔬", "🌏", "🗣️", "🎯", "🔥", "⭐", "💡",
   "🏃", "💪", "🧘", "🚴", "🍽️", "☕", "😴", "💊",
@@ -126,10 +145,10 @@ const normalize = (s) => mergeStates(s && typeof s === "object" ? s : {}, {});
 function defaultState() {
   return {
     sections: [
-      { id: uid(), emoji: "📚", name: "공부", color: "#a24bd1" },
-      { id: uid(), emoji: "💼", name: "업무", color: "#14a5b5" },
-      { id: uid(), emoji: "🏃", name: "운동", color: "#f07d12" },
-      { id: uid(), emoji: "🏠", name: "개인", color: "#e8467c" },
+      { id: uid(), emoji: "📚", name: "공부", color: "#3b6ea5" },
+      { id: uid(), emoji: "💼", name: "업무", color: "#2f5d50" },
+      { id: uid(), emoji: "⛸️", name: "운동", color: "#9b2335" },
+      { id: uid(), emoji: "☕", name: "개인", color: "#7a5c4e" },
     ],
     todos: {},     // { "YYYY-MM-DD": [{ id, sectionId, text, done, u }] }
     logs: [],      // [{ id, sectionId, start, end, u }]
@@ -228,6 +247,7 @@ function stopTimer(end = Date.now()) {
    =========================================================== */
 function renderTop() {
   $("#brand").innerHTML = `<span class="logo-b">MY</span><span class="logo-l">PLANNER</span>`;
+  $("#winterBtn").innerHTML = `${emo("❄️")} 겨울 색`;
   $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${ui.calOpen ? "달력 접기" : "달력"}</span>`;
   $("#calCard").classList.toggle("hidden", !ui.calOpen);
 }
@@ -354,6 +374,7 @@ function renderSections(entries) {
   wrap.parentElement.classList.toggle("editing", editing);
   $("#editToggle").classList.toggle("on", editing);
   $("#editToggle").textContent = editing ? "완료" : "편집";
+  $("#winterBtn").classList.toggle("hidden", !editing);
 
   // 다시 그려도 입력 중이던 글자는 유지
   const typing = wrap.querySelector(".add-todo input");
@@ -493,7 +514,7 @@ function openSheet(secId = null) {
     $("#sheetName").value = sec.name;
   } else {
     const used = new Set(state.sections.map((s) => s.color));
-    draft = { emoji: "📚", color: PALETTE.find((c) => !used.has(c)) || PALETTE[0] };
+    draft = { emoji: "❄️", color: WINTER_ORDER.find((c) => !used.has(c)) || PALETTE[0] };
     $("#sheetName").value = "";
   }
   $("#sheetTitle").textContent = sec ? "섹션 설정" : "새 섹션";
@@ -594,6 +615,16 @@ document.addEventListener("keydown", (e) => {
 $("#showAddSection").onclick = () => openSheet();
 
 $("#editToggle").onclick = () => { editing = !editing; openAdd = null; renderDay(); };
+
+/* ❄️ 모든 섹션에 겨울 색 입히기 (편집 모드에서) */
+$("#winterBtn").onclick = () => {
+  if (!state.sections.length) return;
+  if (!confirm("모든 섹션의 색을 겨울 색으로 바꿀까요?\n(나중에 섹션마다 다시 바꿀 수 있어요)")) return;
+  state.sections.forEach((sec, i) => { sec.color = WINTER_ORDER[i % WINTER_ORDER.length]; touch(sec); });
+  save();
+  renderCalendar();
+  renderDay();
+};
 
 /* ===========================================================
    10분 단위 타임테이블
