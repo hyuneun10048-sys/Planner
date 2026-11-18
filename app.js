@@ -1034,7 +1034,7 @@ function setPickHint() {
   el.classList.toggle("is-running", !!r && pickStart === null);
   if (r) el.style.setProperty("--c", secById(r.sectionId).color);
   if (pickStart !== null) el.innerHTML = "끝 칸 선택";
-  else if (r) el.innerHTML = `<span class="runner cat">${emo("🐈‍⬛")}</span><span class="st-text">기록중<i class="dots"></i></span>`;
+  else if (r) el.innerHTML = `<span class="runner">${emo("🏃")}</span><span class="st-text">기록중<i class="dots"></i></span>`;
   else el.innerHTML = `<span class="idler">${emo("🧍")}</span><span class="st-text">기록 대기<i class="dots"></i></span>`;
 }
 
