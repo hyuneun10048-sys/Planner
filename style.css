@@ -606,3 +606,10 @@ body.dragging * { cursor: grabbing !important; }
   list-style: none; height: 3px; margin: 2px 0;
   background: var(--c, var(--ink));
 }
+
+/* 🐈‍⬛ 기록중: 검은 고양이가 총총 */
+.tt-hint .runner.cat .emo { width: 22px; height: 22px; left: 4px; bottom: 2px; animation: cat-trot .28s ease-in-out infinite alternate; }
+@keyframes cat-trot {
+  from { transform: translateY(0) rotate(2deg); }
+  to   { transform: translateY(-3px) rotate(-3deg); }
+}
