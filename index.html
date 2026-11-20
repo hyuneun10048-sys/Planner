@@ -149,6 +149,32 @@
     </form>
   </div>
 
+  <!-- 할 일 메뉴 -->
+  <div class="sheet-backdrop hidden" id="todoSheet">
+    <div class="sheet todo-sheet" id="todoForm">
+      <div class="sheet-grip"></div>
+      <h3 class="sheet-title ts-title" id="tsTitle"></h3>
+      <p class="ts-info" id="tsInfo"></p>
+      <p class="ts-memo" id="tsMemoText"></p>
+      <div class="ts-acts" id="tsActs"></div>
+      <input type="date" id="tsDate" class="ts-date" aria-label="옮길 날짜" />
+      <div class="routine-pick hidden" id="routinePick">
+        <div class="field-label">반복할 요일</div>
+        <div class="rp-days" id="rpDays"></div>
+        <div class="rp-row">
+          <button type="button" class="rp-all" id="rpAll">매일</button>
+          <span class="spacer"></span>
+          <button type="button" class="sheet-save" id="rpSave">루틴 만들기</button>
+        </div>
+      </div>
+      <div class="ts-bottom">
+        <button type="button" class="ts-btn" id="tsEdit">✏️ 수정</button>
+        <button type="button" class="ts-btn danger" id="tsDelete">🗑️ 삭제</button>
+      </div>
+      <button type="button" class="ts-close" id="tsClose">닫기</button>
+    </div>
+  </div>
+
   <button class="fab" id="fab" aria-label="오늘로 이동"></button>
 
   <!-- 섹션 설정 시트 -->

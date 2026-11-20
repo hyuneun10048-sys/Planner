@@ -677,3 +677,45 @@ select.field:disabled { color: var(--sub); background-color: var(--soft); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   pointer-events: none;
 }
+
+/* ---------- 할 일 메뉴 ---------- */
+.todo-time { flex: none; font-size: 11.5px; font-weight: 800; color: var(--sub); font-variant-numeric: tabular-nums; margin-top: 3px; }
+.todo.doing .todo-time { color: var(--c); }
+.todo.doing .todo-text { font-weight: 800; }
+.todo-memo { display: block; font-size: 11.5px; font-weight: 600; color: var(--sub); margin-top: 1px; }
+.todo-badge .emo { width: 12px; height: 12px; vertical-align: -1px; }
+.todo-text { cursor: pointer; }
+
+.todo-sheet { --c: var(--ink); }
+.ts-title { text-align: center; margin-bottom: 6px; word-break: break-all; }
+.ts-info { text-align: center; margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--sub); }
+.ts-memo { text-align: center; margin: 0 0 12px; font-size: 13.5px; color: #444; min-height: 0; }
+.ts-memo:empty { display: none; }
+.ts-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 10px 0 6px; border-top: 3px solid var(--c); padding-top: 12px; }
+.ts-act {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 4px; text-align: left;
+  font-size: 15px; font-weight: 700;
+}
+.ts-act:hover { background: var(--soft); }
+.ts-ico {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  background: var(--soft);
+}
+.ts-ico .emo { width: 20px; height: 20px; }
+.ts-date { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+.routine-pick { border: var(--bw) solid var(--ink); padding: 4px 12px 12px; margin: 8px 0; }
+.rp-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.rp-day { height: 38px; border: var(--bw) solid var(--line); font-weight: 800; }
+.rp-day.sun { color: var(--sun); }
+.rp-day.sat { color: var(--sat); }
+.rp-day.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.rp-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.rp-all { height: 38px; padding: 0 14px; border: var(--bw) solid var(--ink); font-weight: 800; }
+.rp-all.on { background: var(--ink); color: #fff; }
+.ts-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.ts-btn { height: 48px; background: var(--soft); font-size: 15px; font-weight: 800; }
+.ts-btn:hover { background: #ececea; }
+.ts-btn.danger { color: var(--sun); }
+.ts-close { display: block; width: 100%; margin-top: 8px; height: 40px; font-weight: 700; color: var(--sub); }

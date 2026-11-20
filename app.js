@@ -238,7 +238,7 @@ function mergeAdjacentLogs() {
   for (const l of logs) {
     // 같은 섹션의 가장 최근 기록 (사이에 다른 섹션 기록이 끼어 있으면 합치지 않음)
     const prev = out[out.length - 1];
-    if (prev && prev.sectionId === l.sectionId && l.start - prev.end <= MERGE_GAP) {
+    if (prev && prev.sectionId === l.sectionId && (prev.todoId || null) === (l.todoId || null) && l.start - prev.end <= MERGE_GAP) {
       if (l.end > prev.end) prev.end = l.end;
       if (l.memo && l.memo !== prev.memo) prev.memo = prev.memo ? `${prev.memo} · ${l.memo}`.slice(0, 60) : l.memo;
       touch(prev);
@@ -283,15 +283,16 @@ function entriesFor(k) {
 /* ===========================================================
    타이머
    =========================================================== */
-function toggleTimer(sectionId) {
+function toggleTimer(sectionId, todoId = null) {
   if (isKcalSec(sectionId)) return;
   const now = Date.now();
   const r = state.running;
   if (r) {
     stopTimer(now);
-    if (r.sectionId === sectionId) { save(); renderDay(); return; } // 같은 섹션 → 종료
+    // 같은 섹션(할 일로 시작했으면 같은 할 일)을 다시 누르면 종료
+    if (r.sectionId === sectionId && (r.todoId || null) === todoId) { save(); renderDay(); return; }
   }
-  state.running = { sectionId, start: now };                       // 다른 섹션 → 전환
+  state.running = todoId ? { sectionId, start: now, todoId } : { sectionId, start: now }; // 다른 섹션/할 일 → 전환
   state.runningU = now;
   save();
   renderDay();
@@ -303,6 +304,11 @@ function stopTimer(end = Date.now()) {
   state.runningU = Date.now();
   if (end - r.start >= 1000) {
     const log = { id: uid(), sectionId: r.sectionId, start: r.start, end, u: Date.now() };
+    if (r.todoId) {
+      log.todoId = r.todoId;
+      const t = findTodo(r.todoId);
+      if (t) log.memo = t.text; // 할 일 이름이 기록 태그로
+    }
     state.logs.push(log);
     trimOverlaps(log); // 타이머 도중 사후기록한 다른 섹션과 겹치면 정리
   }
@@ -315,6 +321,8 @@ function renderTop() {
   $("#brand").innerHTML = `<span class="logo-b">MY</span><span class="logo-l">PLANNER</span>`;
   $("#winterBtn").innerHTML = `${emo("❄️")} 겨울 색`;
   $("#refreshBtn").innerHTML = emo("🔄");
+  $("#tsEdit").innerHTML = `${emo("✏️")} 수정`;
+  $("#tsDelete").innerHTML = `${emo("🗑️")} 삭제`;
   $("#calToggle").innerHTML = `${emo("📅")}<span class="lbl">${ui.calOpen ? "달력 접기" : "달력"}</span>`;
   $("#calCard").classList.toggle("hidden", !ui.calOpen);
 }
@@ -430,7 +438,7 @@ function renderNowBar() {
   bar.style.setProperty("--cbg", soft(sec.color));
   bar.innerHTML = `
     <span class="dot"></span>
-    <span class="what">${emo(sec.emoji)} ${esc(sec.name)}<span class="since">${hm(r.start)}부터</span></span>
+    <span class="what">${emo(sec.emoji)} ${esc(sec.name)}${r.todoId && findTodo(r.todoId) ? ` · ${esc(findTodo(r.todoId).text)}` : ""}<span class="since">${hm(r.start)}부터</span></span>
     <span class="clock" id="nowClock">${clock(Date.now() - r.start)}</span>
     <button class="stop" id="stopBtn">종료</button>`;
   $("#stopBtn").onclick = () => { stopTimer(); save(); renderDay(); };
@@ -493,9 +501,10 @@ function renderSections(entries) {
                 kcalPending.has(t.id) ? "계산 중…" : Number.isFinite(t.kcal) ? `${t.kcal.toLocaleString()}<small> kcal</small>` : "입력"}</button>
               <button class="del" data-act="deltodo" aria-label="삭제">${emo("❌")}</button>
             </li>` : `
-            <li class="todo ${t.done ? "done" : ""}" data-id="${t.id}">
+            <li class="todo ${t.done ? "done" : ""} ${state.running?.todoId === t.id ? "doing" : ""}" data-id="${t.id}">
               <button class="check" data-act="toggle" aria-label="완료">${CHECK_SVG}</button>
-              <span class="todo-text" data-act="edittodo">${esc(t.text)}</span>
+              <span class="todo-text" data-act="edittodo">${esc(t.text)}${t.routineId ? ` <span class="todo-badge">${emo("🔁")}</span>` : ""}${t.memo ? `<small class="todo-memo">${esc(t.memo)}</small>` : ""}</span>
+              ${todoTime(t.id) ? `<span class="todo-time">${korDur(todoTime(t.id))}</span>` : ""}
               <button class="del" data-act="deltodo" aria-label="삭제">${emo("❌")}</button>
             </li>`).join("")}
         </ul>
@@ -552,7 +561,12 @@ $("#sections").addEventListener("click", (e) => {
       break;
     }
     case "edittodo": {
-      if (!editing) return;
+      if (!editing) {
+        // 일반 모드: 할 일 메뉴 (식단 항목 제외)
+        const t0 = list.find((x) => x.id === todoId);
+        if (t0 && !isKcalSec(t0.sectionId)) openTodoSheet(t0.id);
+        return;
+      }
       const t = list.find((x) => x.id === todoId);
       const kcalItem = t && isKcalSec(t.sectionId);
       const text = t && prompt(kcalItem ? "음식 수정" : "할 일 수정", t.text);
@@ -889,6 +903,7 @@ document.addEventListener("keydown", (e) => {
   if (!$("#syncSheet").classList.contains("hidden")) closeSyncSheet();
   if (!$("#logSheet").classList.contains("hidden")) closeLogSheet();
   if (!$("#evSheet").classList.contains("hidden")) closeEvSheet();
+  if (!$("#todoSheet").classList.contains("hidden")) closeTodoSheet();
 });
 $("#showAddSection").onclick = () => openSheet();
 
@@ -1181,6 +1196,7 @@ $("#logCancel").onclick = closeLogSheet;
 $("#logSheet").addEventListener("click", (e) => { if (e.target.id === "logSheet") closeLogSheet(); });
 
 function renderDay() {
+  ensureRoutines(current);
   const entries = entriesFor(current);
   renderEvents();
   renderDayHead(entries);
@@ -1629,6 +1645,213 @@ async function initSync() {
 }
 
 /* ===========================================================
+   할 일 메뉴 (오늘 하기 / 다른 날 / 루틴 / 시작 / 메모 / 수정 / 삭제)
+   =========================================================== */
+/** id 로 할 일 찾기 (모든 날짜에서) */
+function findTodo(id) {
+  for (const k in state.todos) { const x = state.todos[k].find((y) => y.id === id); if (x) return x; }
+  return null;
+}
+/** 이 할 일에 쓴 시간 (연결된 기록 + 지금 진행 중) */
+function todoTime(id) {
+  let ms = 0;
+  for (const l of state.logs) if (l.todoId === id) ms += l.end - l.start;
+  const r = state.running;
+  if (r && r.todoId === id) ms += Date.now() - r.start;
+  return ms;
+}
+/** 할 일이 들어 있는 날짜 */
+function todoDay(id) {
+  for (const k in state.todos) if (state.todos[k].some((x) => x.id === id)) return k;
+  return null;
+}
+/** 할 일을 다른 날로 옮김 (동기화 때 예전 날에 다시 생기지 않도록 삭제 표시 후 더 새로운 시각으로) */
+function moveTodo(id, toDay) {
+  const from = todoDay(id);
+  if (!from || from === toDay) return;
+  const t = state.todos[from].find((x) => x.id === id);
+  state.todos[from] = state.todos[from].filter((x) => x.id !== id);
+  tomb(id);
+  t.u = Date.now() + 1;
+  delete t.o;
+  todosOf(toDay).push(t);
+}
+
+/* 🔁 루틴: 섹션에 저장 (sec.routines) → 해당 요일 날짜를 열면 할 일이 자동으로 생김 */
+const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
+function ensureRoutines(day) {
+  const dow = fromKey(day).getDay();
+  let added = false;
+  for (const sec of state.sections) {
+    for (const r of sec.routines || []) {
+      if (day < r.start || (r.end && day > r.end) || !r.days.includes(dow)) continue;
+      const list = todosOf(day);
+      if (list.some((t) => t.routineId === r.id)) continue;
+      const id = `${r.id}~${day}`; // 기기마다 같은 id → 동기화해도 하나만
+      if (state.del[id]) continue;   // 그날 지운 루틴 할 일은 다시 만들지 않음
+      list.push({ id, sectionId: sec.id, text: r.text, done: false, routineId: r.id, u: 1 });
+      added = true;
+    }
+  }
+  if (added) save(false);
+}
+const routineOf = (t) => {
+  for (const sec of state.sections) for (const r of sec.routines || []) if (r.id === t.routineId) return { sec, r };
+  return null;
+};
+
+let sheetTodo = null;
+function openTodoSheet(id) {
+  sheetTodo = id;
+  paintTodoSheet();
+  $("#todoSheet").classList.remove("hidden");
+  requestAnimationFrame(() => $("#todoSheet").classList.add("show"));
+}
+function closeTodoSheet() {
+  $("#todoSheet").classList.remove("show");
+  setTimeout(() => $("#todoSheet").classList.add("hidden"), 200);
+  $("#routinePick").classList.add("hidden");
+}
+function paintTodoSheet() {
+  const t = findTodo(sheetTodo);
+  if (!t) { closeTodoSheet(); return; }
+  const sec = secById(t.sectionId);
+  const day = todoDay(t.id);
+  const ms = todoTime(t.id);
+  const n = state.logs.filter((l) => l.todoId === t.id).length;
+  const ro = t.routineId && routineOf(t);
+  const doing = state.running?.todoId === t.id;
+  $("#todoForm").style.setProperty("--c", sec.color);
+  $("#tsTitle").textContent = t.text;
+  $("#tsInfo").innerHTML = [
+    `${emo(sec.emoji)} ${esc(sec.name)}`,
+    `${fromKey(day).getMonth() + 1}/${fromKey(day).getDate()}`,
+    ms ? `⏱ ${korDur(ms)}${n ? ` (${n}번)` : ""}` : "⏱ 아직 기록 없음",
+    ro && !ro.r.end ? `🔁 ${ro.r.days.length === 7 ? "매일" : ro.r.days.map((d) => WEEK[d]).join("")}` : "",
+  ].filter(Boolean).join(" · ");
+  $("#tsMemoText").textContent = t.memo || "";
+  const acts = [];
+  if (day !== todayKey()) acts.push(["today", "📅", "오늘 하기"]);
+  acts.push(["other", "↪️", "다른 날 하기"]);
+  acts.push(["routine", "🔁", ro && !ro.r.end ? "루틴 해제" : "루틴으로 만들기"]);
+  acts.push(["start", doing ? "⏹️" : "▶️", doing ? "멈추기" : "시작하기"]);
+  acts.push(["memo", "📝", t.memo ? "메모 수정" : "메모"]);
+  $("#tsActs").innerHTML = acts.map(([k, e, label]) => `<button type="button" class="ts-act" data-k="${k}"><span class="ts-ico">${emo(e)}</span>${label}</button>`).join("");
+  $("#tsDate").value = day;
+}
+
+$("#tsActs").addEventListener("click", (e) => {
+  const b = e.target.closest(".ts-act");
+  if (!b) return;
+  const t = findTodo(sheetTodo);
+  if (!t) return;
+  switch (b.dataset.k) {
+    case "today":
+      moveTodo(t.id, todayKey());
+      break;
+    case "other":
+      // 숨겨둔 날짜 칸을 열어 고르게 함
+      try { $("#tsDate").showPicker(); } catch { $("#tsDate").focus(); $("#tsDate").click(); }
+      return;
+    case "routine": {
+      const ro = t.routineId && routineOf(t);
+      if (ro && !ro.r.end) {
+        if (!confirm("루틴을 해제할까요? (오늘까지의 할 일은 남아요)")) return;
+        ro.r.end = todoDay(t.id);
+        touch(ro.sec);
+        break;
+      }
+      const dow = fromKey(todoDay(t.id)).getDay();
+      routineDays = new Set([dow]);
+      paintRoutinePick();
+      $("#routinePick").classList.remove("hidden");
+      return;
+    }
+    case "start":
+      toggleTimer(t.sectionId, t.id);
+      closeTodoSheet();
+      return;
+    case "memo": {
+      const v = prompt("메모 (한 줄)", t.memo || "");
+      if (v === null) return;
+      if (v.trim()) t.memo = v.trim().slice(0, 80); else delete t.memo;
+      touch(t);
+      break;
+    }
+  }
+  save();
+  renderCalendar();
+  renderDay();
+  paintTodoSheet();
+  if (b.dataset.k === "today") closeTodoSheet();
+});
+$("#tsDate").addEventListener("change", () => {
+  const v = $("#tsDate").value;
+  const t = findTodo(sheetTodo);
+  if (!v || !t || v === todoDay(t.id)) return;
+  moveTodo(t.id, v);
+  save();
+  closeTodoSheet();
+  goTo(v); // 옮긴 날로 이동해서 보여줌
+});
+
+let routineDays = new Set();
+function paintRoutinePick() {
+  $("#rpDays").innerHTML = WEEK.map((w, i) => `<button type="button" class="rp-day ${routineDays.has(i) ? "on" : ""} ${i === 0 ? "sun" : i === 6 ? "sat" : ""}" data-d="${i}">${w}</button>`).join("");
+  $("#rpAll").classList.toggle("on", routineDays.size === 7);
+}
+$("#rpDays").addEventListener("click", (e) => {
+  const b = e.target.closest(".rp-day");
+  if (!b) return;
+  const d = Number(b.dataset.d);
+  if (routineDays.has(d)) routineDays.delete(d); else routineDays.add(d);
+  paintRoutinePick();
+});
+$("#rpAll").onclick = () => { routineDays = routineDays.size === 7 ? new Set() : new Set([0, 1, 2, 3, 4, 5, 6]); paintRoutinePick(); };
+$("#rpSave").onclick = () => {
+  const t = findTodo(sheetTodo);
+  if (!t || !routineDays.size) return;
+  const sec = state.sections.find((x) => x.id === t.sectionId);
+  if (!sec) return;
+  const r = { id: uid(), text: t.text, days: [...routineDays].sort(), start: todoDay(t.id) };
+  sec.routines = [...(sec.routines || []), r];
+  touch(sec);
+  t.routineId = r.id; // 지금 할 일이 첫 번째 루틴 할 일
+  touch(t);
+  save();
+  $("#routinePick").classList.add("hidden");
+  renderDay();
+  paintTodoSheet();
+};
+
+$("#tsEdit").onclick = () => {
+  const t = findTodo(sheetTodo);
+  if (!t) return;
+  const v = prompt("할 일 수정", t.text);
+  if (!v || !v.trim()) return;
+  t.text = v.trim().slice(0, 120);
+  touch(t);
+  save();
+  renderCalendar();
+  renderDay();
+  paintTodoSheet();
+};
+$("#tsDelete").onclick = () => {
+  const t = findTodo(sheetTodo);
+  if (!t || !confirm(`'${t.text}' 할 일을 삭제할까요?`)) return;
+  const day = todoDay(t.id);
+  state.todos[day] = state.todos[day].filter((x) => x.id !== t.id);
+  tomb(t.id);
+  if (state.running?.todoId === t.id) state.running.todoId = undefined;
+  save();
+  closeTodoSheet();
+  renderCalendar();
+  renderDay();
+};
+$("#todoSheet").addEventListener("click", (e) => { if (e.target.id === "todoSheet") closeTodoSheet(); });
+$("#tsClose").onclick = closeTodoSheet;
+
+/* ===========================================================
    시작 & 실시간 갱신
    =========================================================== */
 renderTop();
@@ -1656,7 +1879,13 @@ setInterval(() => {
   const el = document.querySelector(`[data-time="${state.running.sectionId}"]`);
   if (el) el.textContent = clock(sectionTotals(entries)[state.running.sectionId] || 0);
   renderDayHead(entries);
-  if (tick % 15 === 0) renderTimetable(entries);
+  if (tick % 15 === 0) {
+    renderTimetable(entries);
+    if (state.running.todoId) {
+      const el2 = document.querySelector(`.todo[data-id="${state.running.todoId}"] .todo-time`);
+      if (el2) el2.textContent = korDur(todoTime(state.running.todoId));
+    }
+  }
 }, 1000);
 
 // 다른 탭에서 바뀐 내용 반영
