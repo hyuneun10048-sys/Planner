@@ -79,7 +79,7 @@ const todayKey = () => dateKey(new Date(Date.now() - DAY_START_HOUR * HOUR));
 const dayWindow = (k) => { const s = fromKey(k).getTime() + DAY_START_HOUR * HOUR; return [s, s + 24 * HOUR]; };
 const hm = (ts) => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
-const hmShort = (ms) => { const m = Math.floor(ms / 60000); return `${Math.floor(m / 60)}H ${pad(m % 60)}M`; };
+const hmShort = (ms) => { const m = Math.floor(ms / 60000); return `${Math.floor(m / 60)}시간 ${pad(m % 60)}분`; };
 const korDur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); const h = Math.floor(m / 60); return h ? `${h}시간 ${m % 60}분` : `${m}분`; };
 const soft = (hex, a = 0.14) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
@@ -330,11 +330,10 @@ function renderTop() {
 function renderCalendar() {
   if (!ui.calOpen) return;
   const y = viewMonth.getFullYear(), m = viewMonth.getMonth();
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  $("#calTitle").textContent = `${months[m]} ${y}`;
+  $("#calTitle").textContent = `${y}년 ${m + 1}월`;
   loadMonthEvents(viewMonth);
 
-  const wds = ["S", "M", "T", "W", "T", "F", "S"];
+  const wds = ["일", "월", "화", "수", "목", "금", "토"];
   let html = wds.map((w, i) => `<div class="cal-wd ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</div>`).join("");
 
   const first = new Date(y, m, 1).getDay();
